@@ -1,0 +1,289 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000"
+    android:keepScreenOn="true">
+
+    <androidx.media3.ui.PlayerView
+        android:id="@+id/playerView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:use_controller="false"
+        app:surface_type="surface_view" />
+
+    <LinearLayout
+        android:id="@+id/osdPanel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@drawable/osd_bg"
+        android:paddingLeft="32dp" android:paddingRight="32dp"
+        android:paddingTop="40dp" android:paddingBottom="20dp"
+        android:visibility="gone">
+
+        <ImageView android:id="@+id/osdLogo"
+            android:layout_width="72dp" android:layout_height="72dp"
+            android:layout_marginRight="20dp" android:scaleType="fitCenter" />
+
+        <LinearLayout
+            android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_weight="1" android:orientation="vertical">
+
+            <TextView android:id="@+id/osdChannel"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:textColor="#FFFFFF" android:textSize="24sp" android:textStyle="bold"
+                android:singleLine="true" android:ellipsize="end" />
+
+            <TextView android:id="@+id/osdProgram"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:textColor="#CCCCCC" android:textSize="17sp"
+                android:singleLine="true" android:ellipsize="end" />
+
+            <ProgressBar android:id="@+id/osdProgress"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent" android:layout_height="4dp"
+                android:layout_marginTop="6dp" android:max="100" android:visibility="invisible" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:orientation="vertical" android:gravity="end">
+
+            <TextView android:id="@+id/osdBadge"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:background="@drawable/badge_bg" android:textColor="#FFFFFF"
+                android:textSize="14sp" android:textStyle="bold" android:visibility="gone" />
+
+            <TextView android:id="@+id/osdClock"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginTop="6dp" android:textColor="#FFFFFF" android:textSize="20sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <TextView android:id="@+id/favStar"
+        android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:layout_gravity="center" android:textSize="120sp" android:text="★"
+        android:textColor="#FFC107" android:visibility="gone" />
+
+    <TextView android:id="@+id/errorMsg"
+        android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:layout_gravity="center" android:background="@drawable/toast_bg"
+        android:textColor="#FFFFFF" android:textSize="18sp" android:visibility="gone" />
+
+    <FrameLayout
+        android:id="@+id/browserOverlay"
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:background="#66000000" android:visibility="gone">
+
+        <LinearLayout
+            android:id="@+id/browserList"
+            android:layout_width="520dp" android:layout_height="match_parent"
+            android:orientation="vertical" android:background="@drawable/panel_bg" android:padding="14dp">
+
+            <TextView android:id="@+id/browserHeader"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:textColor="#F5B50A" android:textSize="20sp" android:textStyle="bold"
+                android:paddingBottom="10dp" android:singleLine="true" android:ellipsize="end" />
+
+            <ListView android:id="@+id/browserListView"
+                android:layout_width="match_parent" android:layout_height="match_parent"
+                android:listSelector="#333B82F6" android:divider="#16FFFFFF" android:dividerHeight="1dp"
+                android:scrollbars="none" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/previewCard"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_gravity="bottom" android:layout_marginLeft="520dp"
+            android:orientation="vertical" android:background="@drawable/osd_bg"
+            android:paddingLeft="28dp" android:paddingRight="28dp"
+            android:paddingTop="36dp" android:paddingBottom="22dp">
+
+            <LinearLayout
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:gravity="center_vertical">
+
+                <ImageView android:id="@+id/prevLogo"
+                    android:layout_width="64dp" android:layout_height="64dp"
+                    android:layout_marginRight="16dp" android:scaleType="fitCenter" />
+
+                <LinearLayout
+                    android:layout_width="0dp" android:layout_height="wrap_content"
+                    android:layout_weight="1" android:orientation="vertical">
+
+                    <TextView android:id="@+id/prevName"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:textColor="#FFFFFF" android:textSize="22sp" android:textStyle="bold"
+                        android:singleLine="true" android:ellipsize="end" />
+
+                    <TextView android:id="@+id/prevNow"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:textColor="#DDE6F0" android:textSize="16sp"
+                        android:singleLine="true" android:ellipsize="end" />
+
+                    <ProgressBar android:id="@+id/prevProgress"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="match_parent" android:layout_height="4dp"
+                        android:layout_marginTop="6dp" android:max="100" android:visibility="invisible" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <TextView android:id="@+id/prevNext"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="10dp" android:textColor="#90A2B8" android:textSize="14sp"
+                android:singleLine="true" android:ellipsize="end" />
+        </LinearLayout>
+    </FrameLayout>
+
+    <LinearLayout
+        android:id="@+id/leftMenu"
+        android:layout_width="380dp" android:layout_height="match_parent"
+        android:layout_gravity="left" android:orientation="vertical"
+        android:background="@drawable/panel_bg" android:padding="16dp" android:visibility="gone">
+
+        <TextView android:id="@+id/plSelector"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:gravity="center" android:textColor="#FFFFFF" android:textSize="20sp"
+            android:textStyle="bold" android:background="#223B82F6" android:padding="12dp" />
+
+        <TextView
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:gravity="center" android:textColor="#88FFFFFF" android:textSize="12sp"
+            android:paddingTop="4dp" android:paddingBottom="8dp" android:text="◀ ▶ — смена плейлиста" />
+
+        <ListView android:id="@+id/catList"
+            android:layout_width="match_parent" android:layout_height="match_parent"
+            android:listSelector="#333B82F6" android:divider="#16FFFFFF" android:dividerHeight="1dp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/rightPanel"
+        android:layout_width="500dp" android:layout_height="match_parent"
+        android:layout_gravity="right" android:orientation="vertical"
+        android:background="@drawable/panel_bg" android:padding="16dp" android:visibility="gone">
+
+        <TextView android:id="@+id/epgHeader"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:textColor="#F5B50A" android:textSize="20sp" android:textStyle="bold"
+            android:singleLine="true" android:ellipsize="end" />
+
+        <LinearLayout
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:background="#14223B"
+            android:padding="12dp" android:layout_marginTop="10dp" android:layout_marginBottom="10dp">
+
+            <TextView android:id="@+id/nowTitle"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:textColor="#FFFFFF" android:textSize="18sp" android:textStyle="bold" />
+
+            <TextView android:id="@+id/nowTime"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:textColor="#9FB3CC" android:textSize="13sp" android:layout_marginTop="2dp" />
+
+            <ProgressBar android:id="@+id/nowProgress"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent" android:layout_height="5dp"
+                android:layout_marginTop="8dp" android:max="100" />
+
+            <TextView android:id="@+id/nowDesc"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:textColor="#C6D2E0" android:textSize="14sp" android:layout_marginTop="8dp"
+                android:maxLines="5" android:ellipsize="end" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="ПРОГРАММА ПЕРЕДАЧ" android:textColor="#7F93AC" android:textSize="12sp"
+            android:paddingBottom="6dp" />
+
+        <ListView android:id="@+id/epgList"
+            android:layout_width="match_parent" android:layout_height="match_parent"
+            android:listSelector="#333B82F6" android:divider="#16FFFFFF" android:dividerHeight="1dp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/setupOverlay"
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:orientation="vertical" android:gravity="center"
+        android:background="#F00B0F14" android:padding="24dp" android:visibility="gone">
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Лёгкий Эфир" android:textColor="#FFFFFF" android:textSize="40sp" android:textStyle="bold" />
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginTop="24dp" android:gravity="center" android:textColor="#CCCCCC" android:textSize="20sp"
+            android:text="1. Подключите телефон к той же Wi-Fi сети, что и ТВ\n2. Откройте на телефоне в браузере адрес:" />
+
+        <TextView android:id="@+id/setupUrl"
+            android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginTop="16dp" android:background="@drawable/toast_bg"
+            android:textColor="#FFC107" android:textSize="34sp" android:textStyle="bold" />
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginTop="16dp" android:gravity="center" android:textColor="#CCCCCC" android:textSize="20sp"
+            android:text="3. Вставьте ссылку на M3U-плейлист — эфир запустится сам.\n\nИли нажмите ОК на пульте, чтобы ввести ссылку вручную." />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/modePicker"
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:orientation="vertical" android:gravity="center"
+        android:background="#F00B0F14" android:padding="24dp" android:visibility="gone">
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Лёгкий Эфир" android:textColor="#FFFFFF" android:textSize="40sp" android:textStyle="bold" />
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginTop="14dp" android:layout_marginBottom="34dp"
+            android:textColor="#AEBDD0" android:textSize="19sp" android:text="Как вы будете пользоваться приложением?" />
+
+        <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <TextView android:id="@+id/modeTv"
+                android:layout_width="220dp" android:layout_height="160dp"
+                android:gravity="center" android:background="#1D2530"
+                android:textColor="#FFFFFF" android:textSize="22sp" android:text="📺\nТелевизор\n(пульт)"
+                android:focusable="true" android:layout_marginEnd="20dp" />
+
+            <TextView android:id="@+id/modePhone"
+                android:layout_width="220dp" android:layout_height="160dp"
+                android:gravity="center" android:background="#1D2530"
+                android:textColor="#FFFFFF" android:textSize="22sp" android:text="📱\nТелефон / планшет\n(сенсор)"
+                android:focusable="true" />
+        </LinearLayout>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginTop="20dp" android:textColor="#7F93AC" android:textSize="14sp"
+            android:text="Это можно поменять позже в настройках" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/phoneBar"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_gravity="bottom" android:orientation="horizontal"
+        android:background="#CC0B0F14" android:paddingTop="10dp" android:paddingBottom="10dp"
+        android:visibility="gone">
+
+        <TextView android:id="@+id/pbMenu" style="@style/PhoneBtn" android:text="☰\nМеню" />
+        <TextView android:id="@+id/pbList" style="@style/PhoneBtn" android:text="📋\nКаналы" />
+        <TextView android:id="@+id/pbPrev" style="@style/PhoneBtn" android:text="⏮\nПред." />
+        <TextView android:id="@+id/pbNext" style="@style/PhoneBtn" android:text="⏭\nСлед." />
+        <TextView android:id="@+id/pbFav" style="@style/PhoneBtn" android:text="⭐\nИзбр." />
+        <TextView android:id="@+id/pbEpg" style="@style/PhoneBtn" android:text="📺\nПрогр." />
+    </LinearLayout>
+
+    <FrameLayout
+        android:id="@+id/screensaver"
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:background="#000000" android:visibility="gone">
+
+        <TextView android:id="@+id/ssClock"
+            android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:textColor="#666666" android:textSize="56sp" />
+    </FrameLayout>
+</FrameLayout>
