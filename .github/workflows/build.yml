@@ -1,0 +1,100 @@
+name: Build & Release BQDiptv
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.7'
+
+      - name: Decode keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/bqd.jks"
+          echo "Keystore decoded ($(stat -c%s "$RUNNER_TEMP/bqd.jks") bytes)"
+
+      - name: Fetch previous version.json
+        run: |
+          REPO="${{ github.repository }}"
+          URL="https://github.com/$REPO/releases/latest/download/version.json"
+          echo "Trying $URL"
+          if curl -fsSL "$URL" -o prev_version.json; then
+            echo "Previous version.json found:"
+            cat prev_version.json
+          else
+            echo "No previous release (first build)."
+            echo "" > prev_version.json
+          fi
+
+      - name: Build release APK
+        env:
+          KEYSTORE_PATH: ${{ runner.temp }}/bqd.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          gradle assembleRelease --no-daemon \
+            -PversionCode=${{ github.run_number }} \
+            -PversionName=1.0.${{ github.run_number }}
+
+      - name: Rename APK
+        run: cp app/build/outputs/apk/release/app-release.apk BQDiptv.apk
+
+      - name: Generate version.json
+        run: |
+          REPO="${{ github.repository }}"
+          RUN="${{ github.run_number }}"
+          APK_URL="https://github.com/$REPO/releases/download/v$RUN/BQDiptv.apk"
+          NOTES="Сборка #$RUN"
+          if [ -s prev_version.json ] && jq -e . prev_version.json >/dev/null 2>&1; then
+            PREV=$(jq '{versionCode: .versionCode, versionName: .versionName, apkUrl: .apkUrl}' prev_version.json)
+          else
+            PREV=null
+          fi
+          jq -n \
+            --argjson vc "$RUN" \
+            --arg vn "1.0.$RUN" \
+            --arg url "$APK_URL" \
+            --arg notes "$NOTES" \
+            --argjson prev "$PREV" \
+            '{versionCode: $vc, versionName: $vn, apkUrl: $url, notes: $notes, previous: $prev}' \
+            > version.json
+          echo "New version.json:"
+          cat version.json
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: BQDiptv 1.0.${{ github.run_number }}
+          files: |
+            BQDiptv.apk
+            version.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BQDiptv-APK
+          path: BQDiptv.apk
