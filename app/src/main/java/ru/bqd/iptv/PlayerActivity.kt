@@ -96,6 +96,13 @@ class PlayerActivity : Activity() {
     private lateinit var screensaver: FrameLayout
     private lateinit var ssClock: TextView
 
+    private lateinit var searchOverlay: View
+    private lateinit var searchInput: EditText
+    private lateinit var searchStatus: TextView
+    private lateinit var searchResults: ListView
+    private var searchRows: List<SearchRow> = emptyList()
+    private val searchRunnable = Runnable { doSearch() }
+
     private val handler = Handler(Looper.getMainLooper())
 
     private var playlists: List<Playlist> = emptyList()
@@ -201,6 +208,11 @@ class PlayerActivity : Activity() {
         phoneBar = findViewById(R.id.phoneBar)
         screensaver = findViewById(R.id.screensaver)
         ssClock = findViewById(R.id.ssClock)
+        searchOverlay = findViewById(R.id.searchOverlay)
+        searchInput = findViewById(R.id.searchInput)
+        searchStatus = findViewById(R.id.searchStatus)
+        searchResults = findViewById(R.id.searchResults)
+        setupSearch()
         clampPanels()
     }
 
@@ -609,6 +621,12 @@ class PlayerActivity : Activity() {
             return super.dispatchKeyEvent(event)
         }
         if (phoneSetup.visibility == View.VISIBLE) return super.dispatchKeyEvent(event)
+        if (searchOverlay.visibility == View.VISIBLE) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.keyCode == KeyEvent.KEYCODE_BACK) {
+                closeSearch(); return true
+            }
+            return super.dispatchKeyEvent(event)
+        }
         if (screensaver.visibility == View.VISIBLE) {
             if (event.action == KeyEvent.ACTION_DOWN) hideScreensaver()
             return true
@@ -805,6 +823,7 @@ class PlayerActivity : Activity() {
 
         val items = ArrayList<CatItem>()
         items.add(CatItem("⚙  Настройки", 0, "SETTINGS"))   // п.7: наверху и выделено
+        items.add(CatItem("🔎  Поиск передачи", 0, "SEARCH"))
         if (menuPlaylistIdx == -1) {
             items.add(CatItem("Все избранные", favoriteChannels().size, "ALL"))
         } else {
@@ -821,6 +840,7 @@ class PlayerActivity : Activity() {
             val item = items[pos]
             when (item.type) {
                 "SETTINGS" -> showSettingsDialog()
+                "SEARCH" -> openSearch()
                 "ALL" -> { selectCategory(null) }
                 "GROUP" -> { selectCategory(item.group) }
             }
@@ -841,7 +861,7 @@ class PlayerActivity : Activity() {
 
     // --- Правая панель EPG (п.4, п.11, п.16 без напоминаний) ---
 
-    private fun openEpgPanel() {
+    private fun openEpgPanel(targetStart: Long = -1L) {
         val ch = currentChannel ?: return
         panel = Panel.RIGHT
         phoneBar.visibility = View.GONE
@@ -893,8 +913,123 @@ class PlayerActivity : Activity() {
         }
         rightPanel.visibility = View.VISIBLE
         epgList.requestFocus()
-        val curIdx = progs.indexOfFirst { now in it.start until it.stop }
-        if (curIdx >= 0) epgList.setSelection(maxOf(0, curIdx - 2))
+        val sel = if (targetStart > 0) progs.indexOfFirst { it.start == targetStart }
+                  else progs.indexOfFirst { now in it.start until it.stop }
+        if (sel >= 0) epgList.setSelection(maxOf(0, sel - 2))
+    }
+
+    // ------------------------------------------------------------ поиск передач (п.17)
+
+    private fun setupSearch() {
+        searchInput.addTextChangedListener(object : android.text.TextWatcher {
+            override fun afterTextChanged(s: android.text.Editable?) {
+                handler.removeCallbacks(searchRunnable)
+                handler.postDelayed(searchRunnable, 350)
+            }
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+        })
+        searchInput.setOnEditorActionListener { _, _, _ ->
+            handler.removeCallbacks(searchRunnable); doSearch(); true
+        }
+    }
+
+    private fun openSearch() {
+        closePanels()
+        phoneBar.visibility = View.GONE
+        searchInput.setText("")
+        searchRows = emptyList()
+        searchResults.adapter = null
+        searchStatus.text = "Введите название. Поиск идёт по идущим сейчас, будущим и доступным в архиве передачам."
+        searchOverlay.visibility = View.VISIBLE
+        searchInput.requestFocus()
+        val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+        imm?.showSoftInput(searchInput, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+    }
+
+    private fun closeSearch() {
+        handler.removeCallbacks(searchRunnable)
+        val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+        imm?.hideSoftInputFromWindow(searchInput.windowToken, 0)
+        searchOverlay.visibility = View.GONE
+        if (isPhone && currentChannel != null) phoneBar.visibility = View.VISIBLE
+    }
+
+    private fun allChannels(): List<Channel> {
+        val all = ArrayList<Channel>()
+        val seen = HashSet<String>()
+        for (pl in playlists) for (c in pl.channels) if (seen.add(c.url)) all.add(c)
+        return all
+    }
+
+    private fun doSearch() {
+        val q = searchInput.text.toString().trim()
+        if (q.length < 2) {
+            searchStatus.text = "Введите хотя бы 2 символа"; searchResults.adapter = null; return
+        }
+        if (!EpgManager.loaded) {
+            searchStatus.text = "Программа ещё не загружена. ${EpgManager.status()}"; return
+        }
+        searchStatus.text = "Поиск…"
+        val channels = allChannels()
+        Thread {
+            val hits = EpgManager.search(q, channels)
+            val rows = ArrayList<SearchRow>()
+            val titleHits = hits.filter { it.inTitle }
+            val descHits = hits.filter { !it.inTitle }
+            for (h in titleHits) rows.add(SearchItem(h))
+            if (descHits.isNotEmpty()) {
+                rows.add(SearchHeader("Найдено в описании"))
+                for (h in descHits) rows.add(SearchItem(h))
+            }
+            handler.post {
+                if (searchOverlay.visibility != View.VISIBLE) return@post
+                searchRows = rows
+                if (rows.isEmpty()) {
+                    searchStatus.text = "Ничего не нашлось по запросу «$q»"
+                    searchResults.adapter = null
+                } else {
+                    searchStatus.text = "Найдено: ${hits.size}"
+                    searchResults.adapter = SearchAdapter(this, rows)
+                    searchResults.setOnItemClickListener { _, _, pos, _ ->
+                        (searchRows.getOrNull(pos) as? SearchItem)?.let { onSearchPick(it.hit) }
+                    }
+                }
+            }
+        }.start()
+    }
+
+    private fun focusChannelContext(ch: Channel) {
+        val plIdx = playlists.indexOfFirst { pl -> pl.channels.any { it.url == ch.url } }
+        if (plIdx >= 0) {
+            curPlaylistIdx = plIdx
+            curCategory = null
+            rebuildZapList(keepCurrent = false)
+            val i = zapList.indexOfFirst { it.url == ch.url }
+            if (i >= 0) zapIndex = i
+        }
+        currentChannel = ch
+    }
+
+    private fun onSearchPick(hit: EpgManager.SearchHit) {
+        val ch = hit.channel
+        focusChannelContext(ch)
+        when (hit.state) {
+            EpgManager.HitState.NOW -> { closeSearch(); play(ch) }
+            EpgManager.HitState.ARCHIVE -> {
+                closeSearch()
+                if (CatchupHelper.canCatchup(ch)) {
+                    currentChannel = ch
+                    playCatchup(ch, CatchupHelper.buildUrl(ch, hit.prog.start / 1000, hit.prog.stop / 1000), hit.prog.title)
+                } else { play(ch); toast("Архив для этого канала недоступен") }
+            }
+            EpgManager.HitState.FUTURE -> {
+                closeSearch()
+                play(ch)
+                openEpgPanel(hit.prog.start)
+                toast("«${hit.prog.title}» — ${dayFmt.format(Date(hit.prog.start))}")
+            }
+        }
     }
 
     // ------------------------------------------------------------ быстрое меню
@@ -977,7 +1112,7 @@ class PlayerActivity : Activity() {
             "⬆ Проверить обновление",
             "⬇ Вернуться на предыдущую версию"
         )
-        AlertDialog.Builder(this).setTitle("Настройки BQDiptv")
+        AlertDialog.Builder(this).setTitle("Настройки BQDiptv • версия ${UpdateManager.currentName(this)}")
             .setItems(items) { _, which ->
                 when (which) {
                     0 -> { closePanels(); showSetupOverlay() }

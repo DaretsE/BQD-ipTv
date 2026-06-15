@@ -267,4 +267,110 @@ object EpgManager {
         if (id.isNotEmpty()) icons[id]?.let { return it }
         return ""
     }
+
+    // ---------- поиск передач по названию и описанию (нестрогий) ----------
+
+    enum class HitState { NOW, FUTURE, ARCHIVE }
+
+    data class SearchHit(
+        val channel: Channel,
+        val prog: Prog,
+        val state: HitState,
+        val inTitle: Boolean
+    )
+
+    /** Нормализация: нижний регистр, ё→е, всё кроме букв/цифр → пробел, схлопывание пробелов. */
+    private fun normLoose(s: String): String {
+        val low = s.lowercase().replace('ё', 'е')
+        val sb = StringBuilder()
+        var prevSpace = true
+        for (c in low) {
+            val ok = (c in 'a'..'z') || (c in 'а'..'я') || (c in '0'..'9')
+            if (ok) { sb.append(c); prevSpace = false }
+            else if (!prevSpace) { sb.append(' '); prevSpace = true }
+        }
+        return sb.toString().trim()
+    }
+
+    /** Расстояние Левенштейна с ранним выходом, если превышает max. */
+    private fun levenshtein(a: String, b: String, max: Int): Int {
+        if (kotlin.math.abs(a.length - b.length) > max) return max + 1
+        val prev = IntArray(b.length + 1) { it }
+        val cur = IntArray(b.length + 1)
+        for (i in 1..a.length) {
+            cur[0] = i
+            var rowMin = cur[0]
+            for (j in 1..b.length) {
+                val cost = if (a[i - 1] == b[j - 1]) 0 else 1
+                cur[j] = minOf(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+                if (cur[j] < rowMin) rowMin = cur[j]
+            }
+            if (rowMin > max) return max + 1
+            System.arraycopy(cur, 0, prev, 0, b.length + 1)
+        }
+        return prev[b.length]
+    }
+
+    private fun looseMatch(text: String, q: String, qNoSpace: String, single: Boolean, maxDist: Int): Boolean {
+        if (text.isEmpty()) return false
+        val nt = normLoose(text)
+        if (nt.isEmpty()) return false
+        if (nt.contains(q)) return true
+        if (qNoSpace.length >= 3 && nt.replace(" ", "").contains(qNoSpace)) return true
+        if (single && q.length in 3..16) {
+            for (w in nt.split(' ')) {
+                if (w.isEmpty()) continue
+                if (kotlin.math.abs(w.length - q.length) <= maxDist && levenshtein(w, q, maxDist) <= maxDist) return true
+            }
+        }
+        return false
+    }
+
+    /**
+     * Ищет по уже загруженной в память программе. Возвращает совпадения,
+     * отсортированные: сейчас → будущее → архив; внутри — по времени.
+     * inTitle=true — совпало в названии, false — только в описании.
+     */
+    fun search(query: String, channels: List<Channel>): List<SearchHit> {
+        val q = normLoose(query)
+        if (q.length < 2) return emptyList()
+        val qNoSpace = q.replace(" ", "")
+        val single = !q.contains(' ')
+        val maxDist = if (q.length <= 4) 1 else 2
+        val now = System.currentTimeMillis()
+
+        val idToCh = LinkedHashMap<String, Channel>()
+        for (c in channels) {
+            val id = resolveId(c)
+            if (id.isNotEmpty() && progs.containsKey(id) && !idToCh.containsKey(id)) idToCh[id] = c
+        }
+
+        val hits = ArrayList<SearchHit>()
+        for ((id, list) in progs) {
+            val ch = idToCh[id] ?: continue
+            val canArc = CatchupHelper.canCatchup(ch)
+            val arcDays = if (ch.catchupDays > 0) ch.catchupDays else 7
+            val arcFrom = now - arcDays.toLong() * 24 * 3600 * 1000
+            for (p in list) {
+                val inTitle = looseMatch(p.title, q, qNoSpace, single, maxDist)
+                val inDesc = if (inTitle) false else looseMatch(p.desc, q, qNoSpace, single, maxDist)
+                if (!inTitle && !inDesc) continue
+                val state = when {
+                    now in p.start until p.stop -> HitState.NOW
+                    p.start > now -> HitState.FUTURE
+                    else -> if (canArc && p.start >= arcFrom && p.stop <= now) HitState.ARCHIVE else continue
+                }
+                hits.add(SearchHit(ch, p, state, inTitle))
+            }
+        }
+        hits.sortWith(Comparator { a, b ->
+            val sa = a.state.ordinal; val sb = b.state.ordinal
+            when {
+                sa != sb -> sa - sb
+                a.state == HitState.ARCHIVE -> b.prog.start.compareTo(a.prog.start)
+                else -> a.prog.start.compareTo(b.prog.start)
+            }
+        })
+        return if (hits.size > 300) hits.subList(0, 300).toList() else hits
+    }
 }

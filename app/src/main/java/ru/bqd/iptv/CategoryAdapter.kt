@@ -34,6 +34,10 @@ class CategoryAdapter(
             right.text = "›"
             root.setBackgroundColor(Color.parseColor("#243447"))
             left.setTextColor(Color.parseColor("#FFC107"))
+        } else if (item.type == "SEARCH") {
+            right.text = "›"
+            root.setBackgroundColor(Color.parseColor("#1B3A2E"))
+            left.setTextColor(Color.parseColor("#7FE3A1"))
         } else {
             right.text = if (item.count > 0) item.count.toString() else ""
             root.setBackgroundColor(Color.TRANSPARENT)

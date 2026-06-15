@@ -340,6 +340,41 @@
         </LinearLayout>
     </ScrollView>
 
+    <LinearLayout
+        android:id="@+id/searchOverlay"
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:background="#F00B0F14" android:padding="20dp" android:visibility="gone">
+
+        <TextView
+            android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="🔎  Поиск передачи" android:textColor="#FFFFFF"
+            android:textSize="26sp" android:textStyle="bold" android:paddingBottom="12dp" />
+
+        <EditText
+            android:id="@+id/searchInput"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:hint="Название фильма или передачи"
+            android:textColor="#FFFFFF" android:textColorHint="#7F93AC"
+            android:textSize="20sp" android:padding="14dp"
+            android:background="#1D2530"
+            android:singleLine="true"
+            android:imeOptions="actionSearch"
+            android:inputType="text" />
+
+        <TextView
+            android:id="@+id/searchStatus"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:textColor="#9FB3CC" android:textSize="14sp"
+            android:paddingTop="10dp" android:paddingBottom="6dp" />
+
+        <ListView
+            android:id="@+id/searchResults"
+            android:layout_width="match_parent" android:layout_height="match_parent"
+            android:listSelector="#333B82F6" android:divider="#16FFFFFF" android:dividerHeight="1dp"
+            android:scrollbars="none" />
+    </LinearLayout>
+
     <FrameLayout
         android:id="@+id/screensaver"
         android:layout_width="match_parent" android:layout_height="match_parent"
