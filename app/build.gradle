@@ -1,0 +1,66 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+// versionCode / versionName приходят из GitHub Actions:
+//   -PversionCode=<номер сборки>  -PversionName=1.0.<номер сборки>
+// Локально (без параметров) подставляются значения по умолчанию.
+def vCode = project.hasProperty('versionCode') ? project.versionCode.toInteger() : 1
+def vName = project.hasProperty('versionName') ? project.versionName : "1.0"
+
+android {
+    namespace 'ru.bqd.iptv'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "ru.bqd.iptv"
+        minSdk 21
+        targetSdk 34
+        versionCode vCode
+        versionName vName
+    }
+
+    signingConfigs {
+        release {
+            def kPath = System.getenv("KEYSTORE_PATH")
+            if (kPath != null) {
+                storeFile file(kPath)
+                storePassword System.getenv("KEYSTORE_PASSWORD")
+                keyAlias System.getenv("KEY_ALIAS")
+                keyPassword System.getenv("KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            // Подписываем релиз только если переданы данные ключа (есть в Actions).
+            if (System.getenv("KEYSTORE_PATH") != null) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.13.1'
+    implementation 'androidx.media3:media3-exoplayer:1.3.1'
+    implementation 'androidx.media3:media3-exoplayer-hls:1.3.1'
+    implementation 'androidx.media3:media3-ui:1.3.1'
+    implementation 'org.nanohttpd:nanohttpd:2.3.1'
+    implementation 'com.google.zxing:core:3.5.2'
+}
