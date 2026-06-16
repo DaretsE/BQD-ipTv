@@ -9,6 +9,12 @@ import android.widget.ImageView
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
+import java.io.DataInputStream
+import java.io.DataOutputStream
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.PushbackInputStream
 import java.net.HttpURLConnection
@@ -102,6 +108,10 @@ object EpgManager {
     @Volatile var programCount = 0; private set
     @Volatile var lastLoadedAt = 0L; private set
 
+    /** Файл дискового кэша EPG (задаётся из Store.init). Нужен, чтобы программа и
+     *  иконки не пропадали после перезапуска/обновления приложения. */
+    @Volatile var cacheFile: File? = null
+
     fun status(): String = when {
         loading && programCount > 0 -> "Обновление программы… (показаны прежние данные)"
         loading -> "Программа загружается…"
@@ -140,6 +150,7 @@ object EpgManager {
                 loaded = true
                 lastError = ""
                 lastLoadedAt = System.currentTimeMillis()
+                saveDisk(newProgs, newNames, icons)   // сохраняем, чтобы пережить перезапуск/обновление
             } else {
                 // ничего не распарсилось — оставляем прежние данные, фиксируем ошибку
                 if (err.isNotEmpty()) lastError = err
@@ -252,6 +263,17 @@ object EpgManager {
 
     fun programsFor(ch: Channel): List<Prog> = progs[resolveId(ch)] ?: emptyList()
 
+    /** Сколько каналов из списка реально сопоставлены с телепрограммой (есть передачи). */
+    fun matchedChannelCount(channels: List<Channel>): Int {
+        var n = 0
+        val seen = HashSet<String>()
+        for (c in channels) {
+            val id = resolveId(c)
+            if (id.isNotEmpty() && progs.containsKey(id) && seen.add(id)) n++
+        }
+        return n
+    }
+
     fun currentFor(ch: Channel): Prog? {
         val now = System.currentTimeMillis()
         return programsFor(ch).firstOrNull { now in it.start until it.stop }
@@ -266,6 +288,73 @@ object EpgManager {
         val id = resolveId(ch)
         if (id.isNotEmpty()) icons[id]?.let { return it }
         return ""
+    }
+
+    // ---------- дисковый кэш EPG (переживает перезапуск и обновление) ----------
+
+    private const val CACHE_FORMAT = 2
+
+    private fun cut(s: String, n: Int) = if (s.length > n) s.substring(0, n) else s
+
+    private fun saveDisk(p: Map<String, List<Prog>>, names: Map<String, String>, ic: Map<String, String>) {
+        val f = cacheFile ?: return
+        try {
+            DataOutputStream(BufferedOutputStream(FileOutputStream(f))).use { o ->
+                o.writeInt(CACHE_FORMAT)
+                o.writeLong(System.currentTimeMillis())
+                o.writeInt(p.size)
+                for ((id, list) in p) {
+                    o.writeUTF(id)
+                    o.writeInt(list.size)
+                    for (pr in list) {
+                        o.writeLong(pr.start); o.writeLong(pr.stop)
+                        o.writeUTF(cut(pr.title, 200)); o.writeUTF(cut(pr.desc, 240))
+                    }
+                }
+                val icSnap = HashMap(ic)
+                o.writeInt(icSnap.size)
+                for ((k, v) in icSnap) { o.writeUTF(k); o.writeUTF(v) }
+                val nmSnap = HashMap(names)
+                o.writeInt(nmSnap.size)
+                for ((k, v) in nmSnap) { o.writeUTF(k); o.writeUTF(v) }
+            }
+        } catch (_: Exception) { }
+    }
+
+    /** Быстро поднимает прошлую программу с диска при старте, чтобы интерфейс не пустовал
+     *  до завершения сетевой загрузки. Сетевое обновление потом атомарно заменит данные. */
+    fun loadDiskCache() {
+        if (loaded || loading) return
+        val f = cacheFile ?: return
+        if (!f.exists() || f.length() == 0L) return
+        try {
+            DataInputStream(BufferedInputStream(FileInputStream(f))).use { i ->
+                if (i.readInt() != CACHE_FORMAT) return
+                val savedAt = i.readLong()
+                val pc = i.readInt()
+                val np = HashMap<String, List<Prog>>(pc * 2)
+                for (a in 0 until pc) {
+                    val id = i.readUTF(); val n = i.readInt()
+                    val l = ArrayList<Prog>(n)
+                    for (b in 0 until n) {
+                        val st = i.readLong(); val sp = i.readLong()
+                        val ti = i.readUTF(); val de = i.readUTF()
+                        l.add(Prog(st, sp, ti, de))
+                    }
+                    np[id] = l
+                }
+                val icN = i.readInt()
+                for (a in 0 until icN) { val k = i.readUTF(); val v = i.readUTF(); icons[k] = v }
+                val nmN = i.readInt()
+                val nn = HashMap<String, String>(nmN * 2)
+                for (a in 0 until nmN) { val k = i.readUTF(); val v = i.readUTF(); nn[k] = v }
+                val total = np.values.sumOf { it.size }
+                if (total > 0 && !loaded && !loading) {
+                    progs = np; nameToId = nn
+                    programCount = total; loaded = true; lastLoadedAt = savedAt
+                }
+            }
+        } catch (_: Exception) { }
     }
 
     // ---------- поиск передач по названию и описанию (нестрогий) ----------
@@ -311,9 +400,7 @@ object EpgManager {
         return prev[b.length]
     }
 
-    private fun looseMatch(text: String, q: String, qNoSpace: String, single: Boolean, maxDist: Int): Boolean {
-        if (text.isEmpty()) return false
-        val nt = normLoose(text)
+    private fun matchNorm(nt: String, q: String, qNoSpace: String, single: Boolean, maxDist: Int): Boolean {
         if (nt.isEmpty()) return false
         if (nt.contains(q)) return true
         if (qNoSpace.length >= 3 && nt.replace(" ", "").contains(qNoSpace)) return true
@@ -326,6 +413,24 @@ object EpgManager {
         return false
     }
 
+    // Предвычисленный индекс: нормализованные название/описание считаются ОДИН раз
+    // на версию EPG, иначе поиск на слабых приставках был слишком медленным.
+    private class IdxProg(val prog: Prog, val nt: String, val nd: String)
+    @Volatile private var searchIndex: Map<String, List<IdxProg>> = emptyMap()
+    @Volatile private var searchIndexAt = Long.MIN_VALUE
+
+    @Synchronized
+    private fun ensureIndex() {
+        if (searchIndexAt == lastLoadedAt && searchIndex.isNotEmpty()) return
+        val src = progs
+        val idx = HashMap<String, List<IdxProg>>(src.size * 2)
+        for ((id, list) in src) {
+            idx[id] = list.map { IdxProg(it, normLoose(it.title), normLoose(it.desc)) }
+        }
+        searchIndex = idx
+        searchIndexAt = lastLoadedAt
+    }
+
     /**
      * Ищет по уже загруженной в память программе. Возвращает совпадения,
      * отсортированные: сейчас → будущее → архив; внутри — по времени.
@@ -334,6 +439,9 @@ object EpgManager {
     fun search(query: String, channels: List<Channel>): List<SearchHit> {
         val q = normLoose(query)
         if (q.length < 2) return emptyList()
+        ensureIndex()
+        val index = searchIndex
+        if (index.isEmpty()) return emptyList()
         val qNoSpace = q.replace(" ", "")
         val single = !q.contains(' ')
         val maxDist = if (q.length <= 4) 1 else 2
@@ -342,19 +450,20 @@ object EpgManager {
         val idToCh = LinkedHashMap<String, Channel>()
         for (c in channels) {
             val id = resolveId(c)
-            if (id.isNotEmpty() && progs.containsKey(id) && !idToCh.containsKey(id)) idToCh[id] = c
+            if (id.isNotEmpty() && index.containsKey(id) && !idToCh.containsKey(id)) idToCh[id] = c
         }
 
         val hits = ArrayList<SearchHit>()
-        for ((id, list) in progs) {
+        for ((id, list) in index) {
             val ch = idToCh[id] ?: continue
             val canArc = CatchupHelper.canCatchup(ch)
             val arcDays = if (ch.catchupDays > 0) ch.catchupDays else 7
             val arcFrom = now - arcDays.toLong() * 24 * 3600 * 1000
-            for (p in list) {
-                val inTitle = looseMatch(p.title, q, qNoSpace, single, maxDist)
-                val inDesc = if (inTitle) false else looseMatch(p.desc, q, qNoSpace, single, maxDist)
+            for (ip in list) {
+                val inTitle = matchNorm(ip.nt, q, qNoSpace, single, maxDist)
+                val inDesc = if (inTitle) false else matchNorm(ip.nd, q, qNoSpace, single, maxDist)
                 if (!inTitle && !inDesc) continue
+                val p = ip.prog
                 val state = when {
                     now in p.start until p.stop -> HitState.NOW
                     p.start > now -> HitState.FUTURE

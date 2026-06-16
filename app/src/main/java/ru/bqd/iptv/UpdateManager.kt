@@ -64,7 +64,7 @@ object UpdateManager {
     }
 
     /** Скачивает APK по ссылке во внутреннюю папку и запускает установку. */
-    fun downloadAndInstall(act: Activity, apkUrl: String, onError: (String) -> Unit, onProgress: (Int) -> Unit) {
+    fun downloadAndInstall(act: Activity, apkUrl: String, onError: (String) -> Unit, onProgress: (Int) -> Unit, onNeedPermission: () -> Unit) {
         if (apkUrl.isEmpty()) { onError("Нет ссылки на файл обновления"); return }
         Thread {
             try {
@@ -85,20 +85,31 @@ object UpdateManager {
                         }
                     }
                 }
-                main.post { install(act, apk, onError) }
+                main.post { install(act, apk, onError, onNeedPermission) }
             } catch (e: Exception) {
                 main.post { onError(e.message ?: "Ошибка скачивания") }
             }
         }.start()
     }
 
-    private fun install(act: Activity, apk: File, onError: (String) -> Unit) {
+    /** Установка уже скачанного APK (вызывается при возврате после выдачи разрешения). */
+    fun installDownloaded(act: Activity, onError: (String) -> Unit) {
+        val apk = File(File(act.filesDir, "update"), "BQDiptv.apk")
+        if (!apk.exists() || apk.length() == 0L) { onError("Файл обновления не найден — скачайте заново"); return }
+        install(act, apk, onError) { onError("Нужно разрешить установку из этого приложения") }
+    }
+
+    /** Есть ли разрешение на установку пакетов (для Android 8+). */
+    fun canInstall(act: Activity): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.O || act.packageManager.canRequestPackageInstalls()
+
+    private fun install(act: Activity, apk: File, onError: (String) -> Unit, onNeedPermission: () -> Unit) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !act.packageManager.canRequestPackageInstalls()) {
                 // просим разрешение на установку из этого приложения
                 try {
                     act.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + act.packageName)))
-                    onError("Разрешите установку из этого приложения и нажмите обновление ещё раз")
+                    onNeedPermission()
                     return
                 } catch (_: Exception) {}
             }

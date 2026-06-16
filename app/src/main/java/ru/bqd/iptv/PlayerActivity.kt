@@ -101,6 +101,7 @@ class PlayerActivity : Activity() {
     private lateinit var searchStatus: TextView
     private lateinit var searchResults: ListView
     private var searchRows: List<SearchRow> = emptyList()
+    private var searchSeq = 0
     private val searchRunnable = Runnable { doSearch() }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -125,6 +126,7 @@ class PlayerActivity : Activity() {
     private var lastBackTs = 0L
     private var pausedSince = 0L
     private var isCatchupPlayback = false
+    private var awaitingInstall = false
     private var browserChannels: List<Channel> = emptyList()
     private var channelBeforeBrowse: Channel? = null
     private var modeSelection = "tv"
@@ -138,6 +140,7 @@ class PlayerActivity : Activity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_player)
         Store.init(this)
+        EpgManager.loadDiskCache()   // п.2: показать прошлую программу/иконки сразу, до сетевой загрузки
         detectDevice()
         bindViews()
         buildPlayer()
@@ -283,6 +286,17 @@ class PlayerActivity : Activity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // п.1: пользователь вернулся после выдачи разрешения на установку — ставим сразу, без повтора скачивания
+        if (awaitingInstall && UpdateManager.canInstall(this)) {
+            awaitingInstall = false
+            handler.postDelayed({
+                UpdateManager.installDownloaded(this) { msg -> toast(msg) }
+            }, 400)
+        }
+    }
+
     /** п.14: при сворачивании останавливаем звук и освобождаем видео-движок (приложение «засыпает»). */
     override fun onStop() {
         super.onStop()
@@ -414,6 +428,7 @@ class PlayerActivity : Activity() {
     private fun afterEpgLoaded() {
         currentChannel?.let { if (panel == Panel.NONE && !playerReleased) updateOsdProgram(it) }
         if (panel == Panel.BROWSER) (browserListView.adapter as? ChannelAdapter)?.notifyDataSetChanged()
+        if (searchOverlay.visibility == View.VISIBLE && searchInput.text.toString().trim().length >= 2) doSearch()
     }
 
     private fun showSetupOverlay() {
@@ -967,32 +982,51 @@ class PlayerActivity : Activity() {
         if (q.length < 2) {
             searchStatus.text = "Введите хотя бы 2 символа"; searchResults.adapter = null; return
         }
-        if (!EpgManager.loaded) {
-            searchStatus.text = "Программа ещё не загружена. ${EpgManager.status()}"; return
+        if (EpgManager.programCount == 0) {
+            searchStatus.text = "Телепрограмма ещё не загружена (${EpgManager.status()}). Поиск запустится сам, как только она загрузится."
+            searchResults.adapter = null
+            return
         }
         searchStatus.text = "Поиск…"
         val channels = allChannels()
+        val seq = ++searchSeq
         Thread {
-            val hits = EpgManager.search(q, channels)
             val rows = ArrayList<SearchRow>()
-            val titleHits = hits.filter { it.inTitle }
-            val descHits = hits.filter { !it.inTitle }
-            for (h in titleHits) rows.add(SearchItem(h))
-            if (descHits.isNotEmpty()) {
-                rows.add(SearchHeader("Найдено в описании"))
-                for (h in descHits) rows.add(SearchItem(h))
+            var count = 0
+            var matched = 0
+            var err: String? = null
+            try {
+                matched = EpgManager.matchedChannelCount(channels)
+                val hits = EpgManager.search(q, channels)
+                count = hits.size
+                for (h in hits) if (h.inTitle) rows.add(SearchItem(h))
+                val descHits = hits.filter { !it.inTitle }
+                if (descHits.isNotEmpty()) {
+                    rows.add(SearchHeader("Найдено в описании"))
+                    for (h in descHits) rows.add(SearchItem(h))
+                }
+            } catch (e: Exception) {
+                err = e.message ?: "ошибка поиска"
             }
             handler.post {
-                if (searchOverlay.visibility != View.VISIBLE) return@post
+                if (seq != searchSeq || searchOverlay.visibility != View.VISIBLE) return@post
                 searchRows = rows
-                if (rows.isEmpty()) {
-                    searchStatus.text = "Ничего не нашлось по запросу «$q»"
-                    searchResults.adapter = null
-                } else {
-                    searchStatus.text = "Найдено: ${hits.size}"
-                    searchResults.adapter = SearchAdapter(this, rows)
-                    searchResults.setOnItemClickListener { _, _, pos, _ ->
-                        (searchRows.getOrNull(pos) as? SearchItem)?.let { onSearchPick(it.hit) }
+                when {
+                    err != null -> { searchStatus.text = "Не удалось выполнить поиск: $err"; searchResults.adapter = null }
+                    rows.isEmpty() -> {
+                        searchStatus.text = when {
+                            channels.isEmpty() -> "Нет загруженных каналов."
+                            matched == 0 -> "Каналы не сопоставлены с телепрограммой (0 из ${channels.size}). Проверьте, что EPG добавлен, а в плейлисте указаны tvg-id или имена каналов, совпадающие с программой."
+                            else -> "Ничего не нашлось по запросу «$q» (каналов с программой: $matched, передач в базе: ${EpgManager.programCount})."
+                        }
+                        searchResults.adapter = null
+                    }
+                    else -> {
+                        searchStatus.text = "Найдено: $count"
+                        searchResults.adapter = SearchAdapter(this, rows)
+                        searchResults.setOnItemClickListener { _, _, pos, _ ->
+                            (searchRows.getOrNull(pos) as? SearchItem)?.let { onSearchPick(it.hit) }
+                        }
                     }
                 }
             }
@@ -1263,8 +1297,13 @@ class PlayerActivity : Activity() {
         val dlg = AlertDialog.Builder(this).setTitle("Загрузка обновления").setMessage("0%").setCancelable(false).create()
         dlg.show()
         UpdateManager.downloadAndInstall(this, url,
-            onError = { msg -> if (dlg.isShowing) dlg.dismiss(); toast(msg) },
-            onProgress = { pct -> if (dlg.isShowing) dlg.setMessage("Скачано $pct%") }
+            onError = { msg -> if (dlg.isShowing) dlg.dismiss(); awaitingInstall = false; toast(msg) },
+            onProgress = { pct -> if (dlg.isShowing) dlg.setMessage("Скачано $pct%") },
+            onNeedPermission = {
+                if (dlg.isShowing) dlg.dismiss()
+                awaitingInstall = true
+                toast("Разрешите установку и вернитесь в приложение — установка продолжится сама")
+            }
         )
     }
 

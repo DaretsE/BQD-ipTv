@@ -91,7 +91,7 @@
 
             <ListView android:id="@+id/browserListView"
                 android:layout_width="match_parent" android:layout_height="match_parent"
-                android:listSelector="#333B82F6" android:divider="#16FFFFFF" android:dividerHeight="1dp"
+                android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true" android:divider="#16FFFFFF" android:dividerHeight="1dp"
                 android:scrollbars="none" />
         </LinearLayout>
 
@@ -162,7 +162,7 @@
 
         <ListView android:id="@+id/catList"
             android:layout_width="match_parent" android:layout_height="match_parent"
-            android:listSelector="#333B82F6" android:divider="#16FFFFFF" android:dividerHeight="1dp" />
+            android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true" android:divider="#16FFFFFF" android:dividerHeight="1dp" />
     </LinearLayout>
 
     <LinearLayout
@@ -212,7 +212,7 @@
 
         <ListView android:id="@+id/epgList"
             android:layout_width="match_parent" android:layout_height="match_parent"
-            android:listSelector="#333B82F6" android:divider="#16FFFFFF" android:dividerHeight="1dp" />
+            android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true" android:divider="#16FFFFFF" android:dividerHeight="1dp" />
     </LinearLayout>
 
     <LinearLayout
@@ -371,7 +371,7 @@
         <ListView
             android:id="@+id/searchResults"
             android:layout_width="match_parent" android:layout_height="match_parent"
-            android:listSelector="#333B82F6" android:divider="#16FFFFFF" android:dividerHeight="1dp"
+            android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true" android:divider="#16FFFFFF" android:dividerHeight="1dp"
             android:scrollbars="none" />
     </LinearLayout>
 

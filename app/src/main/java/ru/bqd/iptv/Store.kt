@@ -18,6 +18,7 @@ object Store {
         prefs = c.getSharedPreferences("bqd_iptv", Context.MODE_PRIVATE)
         cacheDir = File(c.filesDir, "cache")
         cacheDir.mkdirs()
+        EpgManager.cacheFile = File(cacheDir, "epg_cache.bin")
         migrate()
     }
 
