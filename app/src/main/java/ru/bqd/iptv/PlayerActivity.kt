@@ -102,6 +102,7 @@ class PlayerActivity : Activity() {
     private lateinit var searchResults: ListView
     private var searchRows: List<SearchRow> = emptyList()
     private var searchSeq = 0
+    private var focusResultsAfterSearch = false
     private val searchRunnable = Runnable { doSearch() }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -134,6 +135,9 @@ class PlayerActivity : Activity() {
     private val timeFmt = SimpleDateFormat("HH:mm", Locale.getDefault())
     private val dayFmt = SimpleDateFormat("d MMM HH:mm", Locale.getDefault())
 
+    // если программа в кэше моложе этого срока — при старте не перегружаем её по сети
+    private val EPG_FRESH_MS = 6L * 3600 * 1000
+
     // ------------------------------------------------------------ lifecycle
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -149,8 +153,8 @@ class PlayerActivity : Activity() {
         setupModePicker()
 
         when (Store.mode) {
-            "tv" -> { isPhone = false; applyMode(); reloadFromStore(firstRun = true) }
-            "phone" -> { isPhone = true; applyMode(); reloadFromStore(firstRun = true) }
+            "tv" -> { isPhone = false; applyMode(); reloadFromStore(firstRun = false) }
+            "phone" -> { isPhone = true; applyMode(); reloadFromStore(firstRun = false) }
             else -> showModePicker()
         }
         handler.postDelayed(screensaverTick, 30000)
@@ -391,36 +395,46 @@ class PlayerActivity : Activity() {
 
     private fun reloadFromStore(firstRun: Boolean) {
         Thread {
-            val cfgs = Store.getPlaylistCfgs().filter { !it.hidden }
-            val loaded = ArrayList<Playlist>()
-            val failed = ArrayList<String>()
-            val epgUrls = ArrayList(Store.getEpgUrls())
-            for (cfg in cfgs) {
-                try {
-                    val file = Store.cachedFile(cfg.url)
-                    val text: String = if (file.exists() && file.length() > 0 && !firstRun) file.readText()
-                    else try { val t = Net.downloadText(cfg.url); file.writeText(t); t }
-                    catch (e: Exception) { if (file.exists() && file.length() > 0) file.readText() else throw e }
-                    val (channels, epg) = M3uParser.parse(text, cfg.name)
-                    if (epg.isNotEmpty() && epg !in epgUrls) epgUrls.add(epg)
-                    if (channels.isNotEmpty()) loaded.add(Playlist(cfg.name, cfg.url, channels, epg))
-                    else failed.add(cfg.name)
-                } catch (_: Exception) { failed.add(cfg.name) }
-            }
-            runOnUiThread {
-                playlists = loaded
-                if (playlists.isEmpty()) {
-                    if (isPhone) showPhoneSetup() else showSetupOverlay()
-                    if (failed.isNotEmpty()) toast("Не удалось загрузить: ${failed.joinToString(", ")}")
-                } else {
-                    setupOverlay.visibility = View.GONE
-                    phoneSetup.visibility = View.GONE
-                    if (currentChannel == null) restoreLastChannel()
-                    else rebuildZapList(keepCurrent = true)
-                    applyMode()
-                    if (failed.isNotEmpty()) toast("Не загрузились: ${failed.joinToString(", ")}")
+            try {
+                val cfgs = Store.getPlaylistCfgs().filter { !it.hidden }
+                val loaded = ArrayList<Playlist>()
+                val failed = ArrayList<String>()
+                val epgUrls = ArrayList(Store.getEpgUrls())
+                for (cfg in cfgs) {
+                    try {
+                        val file = Store.cachedFile(cfg.url)
+                        val text: String = if (file.exists() && file.length() > 0 && !firstRun) file.readText()
+                        else try { val t = Net.downloadText(cfg.url, 40 * 1024 * 1024); file.writeText(t); t }
+                        catch (e: Throwable) { if (file.exists() && file.length() > 0) file.readText() else throw e }
+                        val (channels, epg) = M3uParser.parse(text, cfg.name)
+                        if (epg.isNotEmpty() && epg !in epgUrls) epgUrls.add(epg)
+                        if (channels.isNotEmpty()) loaded.add(Playlist(cfg.name, cfg.url, channels, epg))
+                        else failed.add(cfg.name)
+                    } catch (_: Throwable) { failed.add(cfg.name) }
                 }
-                if (epgUrls.isNotEmpty()) EpgManager.loadAsync(epgUrls) { afterEpgLoaded() }
+                runOnUiThread {
+                    playlists = loaded
+                    if (playlists.isEmpty()) {
+                        if (isPhone) showPhoneSetup() else showSetupOverlay()
+                        if (failed.isNotEmpty()) toast("Не удалось загрузить: ${failed.joinToString(", ")}")
+                    } else {
+                        setupOverlay.visibility = View.GONE
+                        phoneSetup.visibility = View.GONE
+                        if (currentChannel == null) restoreLastChannel()
+                        else rebuildZapList(keepCurrent = true)
+                        applyMode()
+                        if (failed.isNotEmpty()) toast("Не загрузились: ${failed.joinToString(", ")}")
+                    }
+                    if (epgUrls.isNotEmpty()) {
+                        // если программа в кэше ещё свежая — не перегружаем по сети при обычном старте
+                        // (иначе значки и EPG каждый раз пере-подкачиваются по 5 минут).
+                        val fresh = EpgManager.loaded && EpgManager.cacheAgeMs() < EPG_FRESH_MS
+                        if (fresh && !firstRun) afterEpgLoaded()
+                        else EpgManager.loadAsync(epgUrls) { afterEpgLoaded() }
+                    }
+                }
+            } catch (_: Throwable) {
+                runOnUiThread { toast("Ошибка загрузки данных") }
             }
         }.start()
     }
@@ -900,29 +914,38 @@ class PlayerActivity : Activity() {
         }
 
         val canArc = CatchupHelper.canCatchup(ch)
+        val arcDays = if (ch.catchupDays > 0) ch.catchupDays else 7
+        val arcFrom = now - arcDays.toLong() * 24 * 3600 * 1000
         if (progs.isEmpty()) {
             val hint = if (EpgManager.loaded) listOf("Для этого канала нет программы передач")
             else listOf(EpgManager.status(), "Добавьте источник EPG с телефона", "или в Настройках на ТВ")
             epgList.adapter = ArrayAdapter(this, R.layout.item_row, hint)
             epgList.setOnItemClickListener { _, _, _, _ -> closePanels() }
         } else {
+            // п.5: помечаем «▶ … · архив» только те прошедшие передачи, что реально доступны
+            // в архиве канала (попадают в окно catchup-days).
             val labels = progs.map { p ->
                 val t = timeFmt.format(Date(p.start))
                 when {
-                    p.stop <= now -> (if (canArc) "▶ " else "   ") + "$t  ${p.title}"
-                    p.start > now -> "•  $t  ${p.title}"
-                    else -> "● $t  ${p.title}  (сейчас)"
+                    now in p.start until p.stop -> "● $t  ${p.title}   · эфир"
+                    p.start > now -> "    $t  ${p.title}"
+                    else -> {
+                        val inArc = canArc && p.start >= arcFrom
+                        (if (inArc) "▶ " else "    ") + "$t  ${p.title}" + (if (inArc) "   · архив" else "")
+                    }
                 }
             }
             epgList.adapter = ArrayAdapter(this, R.layout.item_row, labels)
             epgList.setOnItemClickListener { _, _, pos, _ ->
                 val p = progs[pos]
                 when {
-                    p.stop <= now -> {
-                        if (canArc) { closePanels(); playCatchup(ch, CatchupHelper.buildUrl(ch, p.start / 1000, p.stop / 1000), p.title) }
-                        else toast("Архив для этого канала недоступен")
+                    now in p.start until p.stop -> closePanels()
+                    p.start > now -> closePanels()   // для будущих передач — никаких напоминаний
+                    else -> {
+                        val inArc = canArc && p.start >= arcFrom
+                        if (inArc) { closePanels(); playCatchup(ch, CatchupHelper.buildUrl(ch, p.start / 1000, p.stop / 1000), p.title) }
+                        else toast(if (canArc) "Передача вне доступного архива (хранится $arcDays дн.)" else "Архив для этого канала недоступен")
                     }
-                    else -> closePanels()   // п.16: для будущих передач — никаких напоминаний
                 }
             }
         }
@@ -944,14 +967,26 @@ class PlayerActivity : Activity() {
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
         })
+        // п.4: по «лупе»/Enter на ТВ прячем полноэкранную клавиатуру (она перекрывала
+        // результаты) и переводим фокус на список найденного.
         searchInput.setOnEditorActionListener { _, _, _ ->
-            handler.removeCallbacks(searchRunnable); doSearch(); true
+            hideSearchKeyboard()
+            focusResultsAfterSearch = true
+            handler.removeCallbacks(searchRunnable)
+            doSearch()
+            true
         }
+    }
+
+    private fun hideSearchKeyboard() {
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+        imm?.hideSoftInputFromWindow(searchInput.windowToken, 0)
     }
 
     private fun openSearch() {
         closePanels()
         phoneBar.visibility = View.GONE
+        focusResultsAfterSearch = false
         searchInput.setText("")
         searchRows = emptyList()
         searchResults.adapter = null
@@ -1005,7 +1040,7 @@ class PlayerActivity : Activity() {
                     rows.add(SearchHeader("Найдено в описании"))
                     for (h in descHits) rows.add(SearchItem(h))
                 }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 err = e.message ?: "ошибка поиска"
             }
             handler.post {
@@ -1020,12 +1055,18 @@ class PlayerActivity : Activity() {
                             else -> "Ничего не нашлось по запросу «$q» (каналов с программой: $matched, передач в базе: ${EpgManager.programCount})."
                         }
                         searchResults.adapter = null
+                        focusResultsAfterSearch = false
                     }
                     else -> {
                         searchStatus.text = "Найдено: $count"
                         searchResults.adapter = SearchAdapter(this, rows)
                         searchResults.setOnItemClickListener { _, _, pos, _ ->
                             (searchRows.getOrNull(pos) as? SearchItem)?.let { onSearchPick(it.hit) }
+                        }
+                        if (focusResultsAfterSearch) {
+                            focusResultsAfterSearch = false
+                            searchResults.requestFocus()
+                            searchResults.setSelection(0)
                         }
                     }
                 }

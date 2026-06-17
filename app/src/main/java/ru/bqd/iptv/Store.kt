@@ -19,7 +19,23 @@ object Store {
         cacheDir = File(c.filesDir, "cache")
         cacheDir.mkdirs()
         EpgManager.cacheFile = File(cacheDir, "epg_cache.bin")
+        installCrashGuard()
         migrate()
+    }
+
+    // Страховка: если приложение всё-таки вылетит (например, из-за слишком большой EPG),
+    // перед завершением процесса удаляем кэш программы, чтобы битый кэш не блокировал
+    // следующий запуск (раньше помогал только сброс данных приложения вручную).
+    private var crashGuardInstalled = false
+    private fun installCrashGuard() {
+        if (crashGuardInstalled) return
+        crashGuardInstalled = true
+        val prev = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            try { File(cacheDir, "epg_cache.bin").delete() } catch (_: Throwable) {}
+            try { File(cacheDir, "epg_cache.bin.tmp").delete() } catch (_: Throwable) {}
+            prev?.uncaughtException(t, e)
+        }
     }
 
     private fun migrate() {

@@ -10,6 +10,7 @@ import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
+import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
@@ -59,8 +60,24 @@ object Net {
         return if (isGzip) GZIPInputStream(pb) else pb
     }
 
-    fun downloadText(urlStr: String): String =
-        open(urlStr).bufferedReader(Charsets.UTF_8).use { it.readText() }
+    fun downloadText(urlStr: String): String = downloadText(urlStr, 40 * 1024 * 1024)
+
+    /** Качаем текст с ограничением размера — чтобы гигантский плейлист не вызвал нехватку памяти и вылет. */
+    fun downloadText(urlStr: String, maxBytes: Int): String {
+        open(urlStr).use { ins ->
+            val buf = ByteArrayOutputStream(1 shl 16)
+            val chunk = ByteArray(1 shl 16)
+            var total = 0
+            while (true) {
+                val r = ins.read(chunk)
+                if (r < 0) break
+                total += r
+                if (total > maxBytes) throw Exception("Файл слишком большой (> ${maxBytes / (1024 * 1024)} МБ)")
+                buf.write(chunk, 0, r)
+            }
+            return buf.toString("UTF-8")
+        }
+    }
 }
 
 object ImageLoader {
@@ -84,7 +101,7 @@ object ImageLoader {
                 val bmp = BitmapFactory.decodeFile(file.absolutePath) ?: return@execute
                 mem.put(url, bmp)
                 main.post { if (into.tag == url) into.setImageBitmap(bmp) }
-            } catch (_: Exception) { }
+            } catch (_: Throwable) { }
         }
     }
 }
@@ -93,6 +110,12 @@ object ImageLoader {
  * EPG с двойной буферизацией: новые данные парсятся в фоне во временные структуры
  * и подменяются атомарно только когда полностью готовы. Старые данные не стираются
  * до момента готовности новых, поэтому программа и иконки не пропадают из интерфейса.
+ *
+ * Защита от вылета и пропаданий:
+ *  - все операции ловят Throwable (в т.ч. нехватку памяти), процесс не падает;
+ *  - размер программы ограничен (число передач, длина текста), чтобы не было OOM;
+ *  - дисковый кэш пишется атомарно (через .tmp + переименование) и при повреждении
+ *    автоматически удаляется, поэтому «битый» кэш не блокирует запуск приложения.
  */
 object EpgManager {
 
@@ -108,9 +131,22 @@ object EpgManager {
     @Volatile var programCount = 0; private set
     @Volatile var lastLoadedAt = 0L; private set
 
+    /** Когда данные были реально получены из сети (переживает перезапуск через дисковый кэш). */
+    @Volatile var cacheSavedAt = 0L; private set
+
     /** Файл дискового кэша EPG (задаётся из Store.init). Нужен, чтобы программа и
      *  иконки не пропадали после перезапуска/обновления приложения. */
     @Volatile var cacheFile: File? = null
+
+    // Ограничения, чтобы большие EPG не вызывали нехватку памяти/вылет.
+    private const val CACHE_FORMAT = 3
+    private const val MAX_PROGRAMS = 280_000
+    private const val MAX_PER_CHANNEL = 4000
+    private const val TITLE_MAX = 160
+    private const val DESC_MAX = 220
+
+    /** Возраст загруженных данных. MAX_VALUE — если данных ещё не было. */
+    fun cacheAgeMs(): Long = if (cacheSavedAt <= 0L) Long.MAX_VALUE else System.currentTimeMillis() - cacheSavedAt
 
     fun status(): String = when {
         loading && programCount > 0 -> "Обновление программы… (показаны прежние данные)"
@@ -122,7 +158,7 @@ object EpgManager {
 
     fun clearAll() {
         progs = emptyMap(); nameToId = emptyMap(); icons.clear()
-        loaded = false; programCount = 0; lastError = ""; lastLoadedAt = 0L
+        loaded = false; programCount = 0; lastError = ""; lastLoadedAt = 0L; cacheSavedAt = 0L
     }
 
     fun loadAsync(urls: List<String>, onDone: () -> Unit) {
@@ -130,33 +166,40 @@ object EpgManager {
         if (list.isEmpty() || loading) { onDone(); return }
         loading = true
         Thread {
-            val newProgs = HashMap<String, MutableList<Prog>>()
-            val newNames = HashMap<String, String>()
-            val newIcons = HashMap<String, String>()
-            var err = ""
-            var okCount = 0
-            for (u in list) {
-                try { parseOne(u, newProgs, newNames, newIcons); okCount++ }
-                catch (e: Exception) { err = (e.message ?: "ошибка") }
+            try {
+                val newProgs = HashMap<String, MutableList<Prog>>()
+                val newNames = HashMap<String, String>()
+                val newIcons = HashMap<String, String>()
+                val counter = intArrayOf(0)
+                var err = ""
+                for (u in list) {
+                    try { parseOne(u, newProgs, newNames, newIcons, counter) }
+                    catch (e: Throwable) { err = (e.message ?: "ошибка") }
+                    if (counter[0] >= MAX_PROGRAMS) break
+                }
+                val total = counter[0]
+                if (total > 0) {
+                    for (l in newProgs.values) l.sortBy { it.start }
+                    // атомарная подмена готовых данных
+                    progs = newProgs
+                    nameToId = newNames
+                    for ((k, v) in newIcons) icons[k] = v
+                    programCount = total
+                    loaded = true
+                    lastError = ""
+                    lastLoadedAt = System.currentTimeMillis()
+                    cacheSavedAt = lastLoadedAt
+                    saveDisk(newProgs, newNames, icons)   // сохраняем, чтобы пережить перезапуск/обновление
+                } else {
+                    // ничего не распарсилось — оставляем прежние данные, фиксируем ошибку
+                    if (err.isNotEmpty()) lastError = err
+                }
+            } catch (t: Throwable) {
+                lastError = t.message ?: "ошибка EPG"
+            } finally {
+                loading = false
+                Handler(Looper.getMainLooper()).post { onDone() }
             }
-            val total = newProgs.values.sumOf { it.size }
-            if (total > 0) {
-                for (l in newProgs.values) l.sortBy { it.start }
-                // атомарная подмена готовых данных
-                progs = newProgs
-                nameToId = newNames
-                for ((k, v) in newIcons) icons[k] = v
-                programCount = total
-                loaded = true
-                lastError = ""
-                lastLoadedAt = System.currentTimeMillis()
-                saveDisk(newProgs, newNames, icons)   // сохраняем, чтобы пережить перезапуск/обновление
-            } else {
-                // ничего не распарсилось — оставляем прежние данные, фиксируем ошибку
-                if (err.isNotEmpty()) lastError = err
-            }
-            loading = false
-            Handler(Looper.getMainLooper()).post { onDone() }
         }.start()
     }
 
@@ -164,7 +207,8 @@ object EpgManager {
         url: String,
         outProgs: HashMap<String, MutableList<Prog>>,
         outNames: HashMap<String, String>,
-        outIcons: HashMap<String, String>
+        outIcons: HashMap<String, String>,
+        counter: IntArray
     ) {
         val now = System.currentTimeMillis()
         val from = now - 2L * 24 * 3600 * 1000
@@ -219,11 +263,14 @@ object EpgManager {
                         }
                         "channel" -> chId = ""
                         "programme" -> {
-                            if (curChannel.isNotEmpty() && curStart > 0 && curStop in from..to) {
-                                outProgs.getOrPut(curChannel) { ArrayList() }
-                                    .add(Prog(curStart, curStop,
-                                        title.toString().trim().ifEmpty { "Без названия" },
-                                        desc.toString().trim()))
+                            if (curChannel.isNotEmpty() && curStart > 0 && curStop in from..to && counter[0] < MAX_PROGRAMS) {
+                                val l = outProgs.getOrPut(curChannel) { ArrayList() }
+                                if (l.size < MAX_PER_CHANNEL) {
+                                    l.add(Prog(curStart, curStop,
+                                        cut(title.toString().trim().ifEmpty { "Без названия" }, TITLE_MAX),
+                                        cut(desc.toString().trim(), DESC_MAX)))
+                                    counter[0]++
+                                }
                             }
                         }
                     }
@@ -292,54 +339,62 @@ object EpgManager {
 
     // ---------- дисковый кэш EPG (переживает перезапуск и обновление) ----------
 
-    private const val CACHE_FORMAT = 2
-
     private fun cut(s: String, n: Int) = if (s.length > n) s.substring(0, n) else s
 
     private fun saveDisk(p: Map<String, List<Prog>>, names: Map<String, String>, ic: Map<String, String>) {
         val f = cacheFile ?: return
+        val tmp = File(f.absolutePath + ".tmp")
         try {
-            DataOutputStream(BufferedOutputStream(FileOutputStream(f))).use { o ->
+            DataOutputStream(BufferedOutputStream(FileOutputStream(tmp))).use { o ->
                 o.writeInt(CACHE_FORMAT)
                 o.writeLong(System.currentTimeMillis())
                 o.writeInt(p.size)
                 for ((id, list) in p) {
-                    o.writeUTF(id)
+                    o.writeUTF(cut(id, 200))
                     o.writeInt(list.size)
                     for (pr in list) {
                         o.writeLong(pr.start); o.writeLong(pr.stop)
-                        o.writeUTF(cut(pr.title, 200)); o.writeUTF(cut(pr.desc, 240))
+                        o.writeUTF(cut(pr.title, TITLE_MAX)); o.writeUTF(cut(pr.desc, DESC_MAX))
                     }
                 }
                 val icSnap = HashMap(ic)
                 o.writeInt(icSnap.size)
-                for ((k, v) in icSnap) { o.writeUTF(k); o.writeUTF(v) }
+                for ((k, v) in icSnap) { o.writeUTF(cut(k, 200)); o.writeUTF(cut(v, 400)) }
                 val nmSnap = HashMap(names)
                 o.writeInt(nmSnap.size)
-                for ((k, v) in nmSnap) { o.writeUTF(k); o.writeUTF(v) }
+                for ((k, v) in nmSnap) { o.writeUTF(cut(k, 200)); o.writeUTF(cut(v, 200)) }
             }
-        } catch (_: Exception) { }
+            // атомарная подмена: пишем в .tmp, затем заменяем основной файл
+            if (f.exists()) f.delete()
+            if (!tmp.renameTo(f)) { tmp.copyTo(f, overwrite = true); tmp.delete() }
+        } catch (_: Throwable) {
+            try { tmp.delete() } catch (_: Throwable) {}
+        }
     }
 
     /** Быстро поднимает прошлую программу с диска при старте, чтобы интерфейс не пустовал
-     *  до завершения сетевой загрузки. Сетевое обновление потом атомарно заменит данные. */
+     *  до завершения сетевой загрузки. Сетевое обновление потом атомарно заменит данные.
+     *  При повреждённом кэше файл удаляется, чтобы не блокировать запуск. */
     fun loadDiskCache() {
         if (loaded || loading) return
         val f = cacheFile ?: return
         if (!f.exists() || f.length() == 0L) return
         try {
             DataInputStream(BufferedInputStream(FileInputStream(f))).use { i ->
-                if (i.readInt() != CACHE_FORMAT) return
+                if (i.readInt() != CACHE_FORMAT) return   // старый формат — будет перезаписан при сетевой загрузке
                 val savedAt = i.readLong()
                 val pc = i.readInt()
+                if (pc < 0 || pc > 2_000_000) throw Exception("bad cache")
                 val np = HashMap<String, List<Prog>>(pc * 2)
+                var total = 0
                 for (a in 0 until pc) {
                     val id = i.readUTF(); val n = i.readInt()
-                    val l = ArrayList<Prog>(n)
+                    if (n < 0 || n > 1_000_000) throw Exception("bad cache")
+                    val l = ArrayList<Prog>(minOf(n, MAX_PER_CHANNEL).coerceAtLeast(0))
                     for (b in 0 until n) {
                         val st = i.readLong(); val sp = i.readLong()
                         val ti = i.readUTF(); val de = i.readUTF()
-                        l.add(Prog(st, sp, ti, de))
+                        if (total < MAX_PROGRAMS) { l.add(Prog(st, sp, ti, de)); total++ }
                     }
                     np[id] = l
                 }
@@ -348,13 +403,14 @@ object EpgManager {
                 val nmN = i.readInt()
                 val nn = HashMap<String, String>(nmN * 2)
                 for (a in 0 until nmN) { val k = i.readUTF(); val v = i.readUTF(); nn[k] = v }
-                val total = np.values.sumOf { it.size }
                 if (total > 0 && !loaded && !loading) {
                     progs = np; nameToId = nn
-                    programCount = total; loaded = true; lastLoadedAt = savedAt
+                    programCount = total; loaded = true; lastLoadedAt = savedAt; cacheSavedAt = savedAt
                 }
             }
-        } catch (_: Exception) { }
+        } catch (_: Throwable) {
+            try { f.delete() } catch (_: Throwable) {}
+        }
     }
 
     // ---------- поиск передач по названию и описанию (нестрогий) ----------
@@ -413,9 +469,9 @@ object EpgManager {
         return false
     }
 
-    // Предвычисленный индекс: нормализованные название/описание считаются ОДИН раз
-    // на версию EPG, иначе поиск на слабых приставках был слишком медленным.
-    private class IdxProg(val prog: Prog, val nt: String, val nd: String)
+    // Лёгкий индекс: нормализуем ТОЛЬКО названия (они короткие) — это быстро и не съедает
+    // память на слабых ТВ. Описания нормализуем на лету и только если в названии не нашли.
+    private class IdxProg(val prog: Prog, val nt: String)
     @Volatile private var searchIndex: Map<String, List<IdxProg>> = emptyMap()
     @Volatile private var searchIndexAt = Long.MIN_VALUE
 
@@ -425,7 +481,7 @@ object EpgManager {
         val src = progs
         val idx = HashMap<String, List<IdxProg>>(src.size * 2)
         for ((id, list) in src) {
-            idx[id] = list.map { IdxProg(it, normLoose(it.title), normLoose(it.desc)) }
+            idx[id] = list.map { IdxProg(it, normLoose(it.title)) }
         }
         searchIndex = idx
         searchIndexAt = lastLoadedAt
@@ -446,6 +502,8 @@ object EpgManager {
         val single = !q.contains(' ')
         val maxDist = if (q.length <= 4) 1 else 2
         val now = System.currentTimeMillis()
+        // На очень больших EPG ищем только по названиям, чтобы не нагружать слабый ТВ.
+        val scanDesc = programCount <= 150_000
 
         val idToCh = LinkedHashMap<String, Channel>()
         for (c in channels) {
@@ -461,7 +519,8 @@ object EpgManager {
             val arcFrom = now - arcDays.toLong() * 24 * 3600 * 1000
             for (ip in list) {
                 val inTitle = matchNorm(ip.nt, q, qNoSpace, single, maxDist)
-                val inDesc = if (inTitle) false else matchNorm(ip.nd, q, qNoSpace, single, maxDist)
+                val inDesc = if (inTitle || !scanDesc) false
+                             else matchNorm(normLoose(ip.prog.desc), q, qNoSpace, single, maxDist)
                 if (!inTitle && !inDesc) continue
                 val p = ip.prog
                 val state = when {
