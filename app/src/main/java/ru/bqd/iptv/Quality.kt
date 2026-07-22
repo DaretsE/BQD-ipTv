@@ -17,6 +17,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
+import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy.LoadErrorInfo
 
 /**
  * Реальные (не декоративные) настройки качества трансляции.
@@ -138,8 +139,9 @@ object Quality {
         }
         return object : DefaultLoadErrorHandlingPolicy(retries) {
             override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorInfo): Long {
-                val n = loadErrorInfo.errorCount.coerceAtLeast(1)
-                return (step * n).coerceAtMost(8_000L)
+                val n: Long = loadErrorInfo.errorCount.coerceAtLeast(1).toLong()
+                val delay: Long = step * n
+                return if (delay > 8_000L) 8_000L else delay
             }
         }
     }
