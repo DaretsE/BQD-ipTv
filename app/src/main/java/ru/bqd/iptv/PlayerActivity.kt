@@ -30,7 +30,6 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.VideoSize
-import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -152,11 +151,11 @@ class PlayerActivity : Activity() {
         setupPhoneControls()
         setupModePicker()
 
-        when (Store.mode) {
-            "tv" -> { isPhone = false; applyMode(); reloadFromStore(firstRun = false) }
-            "phone" -> { isPhone = true; applyMode(); reloadFromStore(firstRun = false) }
-            else -> showModePicker()
-        }
+        // Экран выбора режима убран: приложение работает только в ТВ-режиме (пульт).
+        if (Store.mode != "tv") Store.mode = "tv"
+        isPhone = false
+        applyMode()
+        reloadFromStore(firstRun = false)
         handler.postDelayed(screensaverTick, 30000)
         handler.postDelayed(clockTick, 1000)
         handler.postDelayed(epgRefreshTick, 3L * 3600 * 1000)
@@ -234,20 +233,32 @@ class PlayerActivity : Activity() {
         rightPanel.layoutParams = rightPanel.layoutParams.apply { width = minOf(dp(500), (w * 0.9).toInt()) }
     }
 
+    /**
+     * ВАЖНО: раньше здесь создавался новый ExoPlayer, а старый экземпляр никто
+     * не освобождал. Настройки буфера/декодера задаются только при создании
+     * плеера, поэтому при их смене оставался «осиротевший» плеер: поверхность
+     * у него отбирали, а звук он продолжал играть — отсюда был баг «звук от
+     * прошлого канала, новый канал висит». Теперь старый плеер гарантированно
+     * освобождается перед созданием нового.
+     */
     private fun buildPlayer() {
-        val bufMs = Store.bufferSec * 1000
-        val extra = if (Store.quality == "stable") 2 else 1
-        val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(maxOf(5000, bufMs / 3), maxOf(20000, bufMs * 2 * extra), 1500, 3000)
+        releasePlayerInternal()
+        player = ExoPlayer.Builder(this)
+            .setLoadControl(Quality.loadControl())
+            .setRenderersFactory(Quality.renderersFactory(this))
+            .setMediaSourceFactory(Quality.mediaSourceFactory(this))
             .build()
-        player = ExoPlayer.Builder(this).setLoadControl(loadControl).build()
         playerView.player = player
         player.playWhenReady = true
         applyQuality()
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) { handleStreamError() }
             override fun onPlaybackStateChanged(state: Int) {
-                if (state == Player.STATE_READY) { errorStreak = 0; errorMsg.visibility = View.GONE }
+                if (state == Player.STATE_READY) {
+                    errorStreak = 0
+                    errorMsg.visibility = View.GONE
+                    applyAutoFrameRate()
+                }
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 pausedSince = if (isPlaying) 0L else System.currentTimeMillis()
@@ -255,6 +266,35 @@ class PlayerActivity : Activity() {
             override fun onVideoSizeChanged(videoSize: VideoSize) {}
         })
         playerReleased = false
+    }
+
+    /** Полное освобождение текущего плеера (без него настройки ломали звук). */
+    private fun releasePlayerInternal() {
+        if (!::player.isInitialized) return
+        try {
+            playerView.player = null
+            player.playWhenReady = false
+            player.stop()
+            player.clearMediaItems()
+            player.release()
+        } catch (_: Throwable) { }
+        playerReleased = true
+    }
+
+    /** Пересоздать плеер после смены настроек и вернуться на текущий канал. */
+    private fun rebuildPlayerKeepingChannel() {
+        val ch = currentChannel
+        buildPlayer()
+        ch?.let { play(it) }
+    }
+
+    /** Автофреймрейт: подстройка частоты экрана под частоту кадров потока. */
+    private fun applyAutoFrameRate() {
+        if (!Store.afr) return
+        try {
+            val fps = player.videoFormat?.frameRate ?: return
+            Quality.applyFrameRate(this, fps)
+        } catch (_: Throwable) { }
     }
 
     private fun applyQuality() {
@@ -311,6 +351,7 @@ class PlayerActivity : Activity() {
     }
 
     override fun onDestroy() {
+        Quality.resetFrameRate(this)
         super.onDestroy()
         handler.removeCallbacksAndMessages(null)
         try { webServer?.stop() } catch (_: Exception) { }
@@ -523,7 +564,7 @@ class PlayerActivity : Activity() {
         currentChannel = ch
         errorMsg.visibility = View.GONE
         handler.removeCallbacks(errorZapRunnable)
-        player.setMediaItem(MediaItem.fromUri(ch.url))
+        player.setMediaItem(Quality.mediaItem(ch.url))
         player.prepare()
         player.play()
         Store.lastChannelUrl = ch.url
@@ -706,7 +747,7 @@ class PlayerActivity : Activity() {
                 KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> { zap(-1); return true }
                 KeyEvent.KEYCODE_DPAD_LEFT -> { openLeftMenu(); return true }
                 KeyEvent.KEYCODE_DPAD_RIGHT -> { openEpgPanel(); return true }
-                KeyEvent.KEYCODE_MENU -> { showQuickMenu(); return true }
+                KeyEvent.KEYCODE_MENU -> { showSettingsDialog(); return true }
                 KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> { player.playWhenReady = !player.playWhenReady; return true }
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
                     if (event.repeatCount == 0) {
@@ -1150,8 +1191,7 @@ class PlayerActivity : Activity() {
         AlertDialog.Builder(this).setTitle("Качество трансляции")
             .setItems(opts) { _, which ->
                 Store.quality = vals[which]
-                applyQuality()
-                if (Store.quality == "stable") { buildPlayer(); currentChannel?.let { play(it) } }
+                applyQuality()   // потолок качества применяется на лету, без перезапуска канала
                 toast("Качество: ${opts[which]}")
             }.show()
     }
@@ -1181,9 +1221,7 @@ class PlayerActivity : Activity() {
             "🔄 Обновить плейлисты",
             "🔄 Обновить программу (EPG)",
             "📶 Качество трансляции",
-            "⏱ Размер буфера: ${Store.bufferSec} сек",
             "🖼 Живое превью в списке: ${if (Store.livePreview) "вкл" else "выкл"}",
-            "🔁 Сменить режим (ТВ/Телефон)",
             "⬆ Проверить обновление",
             "⬇ Вернуться на предыдущую версию"
         )
@@ -1197,13 +1235,92 @@ class PlayerActivity : Activity() {
                     4 -> showManageEpg()
                     5 -> { closePanels(); forceRefreshPlaylists() }
                     6 -> { closePanels(); forceRefreshEpg() }
-                    7 -> showQualityDialog()
-                    8 -> showBufferDialog()
-                    9 -> { Store.livePreview = !Store.livePreview; toast("Живое превью: ${if (Store.livePreview) "вкл" else "выкл"}") }
-                    10 -> { Store.mode = ""; recreate() }
-                    11 -> { closePanels(); checkUpdates(silent = false) }
-                    12 -> { closePanels(); rollbackVersion() }
+                    7 -> showQualitySettings()
+                    8 -> { Store.livePreview = !Store.livePreview; toast("Живое превью: ${if (Store.livePreview) "вкл" else "выкл"}") }
+                    9 -> { closePanels(); checkUpdates(silent = false) }
+                    10 -> { closePanels(); rollbackVersion() }
                 }
+            }.show()
+    }
+
+    /**
+     * Качество трансляции — все параметры, реально влияющие на воспроизведение.
+     * Особенно важно для слабого интернета (дача): задержка от эфира и
+     * упорное переподключение дают больше, чем размер буфера.
+     */
+    private fun showQualitySettings() {
+        val items = arrayOf(
+            "🎚 Потолок качества: ${Quality.qualityLabel()}",
+            "⏱ Размер буфера: ${Quality.bufferLabel()}",
+            "🛰 Задержка от эфира: ${Quality.liveOffsetLabel()}",
+            "🔌 При обрыве связи: ${Quality.retryLabel()}",
+            "🧩 Тип декодера: ${Quality.decoderLabel()}",
+            "🖥 Автофреймрейт: ${if (Store.afr) "вкл" else "выкл"}"
+        )
+        AlertDialog.Builder(this).setTitle("Качество трансляции")
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> showQualityDialog()
+                    1 -> showBufferDialog()
+                    2 -> showLiveOffsetDialog()
+                    3 -> showRetryDialog()
+                    4 -> showDecoderDialog()
+                    5 -> {
+                        Store.afr = !Store.afr
+                        if (!Store.afr) Quality.resetFrameRate(this)
+                        toast("Автофреймрейт: ${if (Store.afr) "вкл" else "выкл"}")
+                        if (Store.afr) applyAutoFrameRate()
+                    }
+                }
+            }.show()
+    }
+
+    /** Отставание от прямого эфира — главный параметр против зависаний. */
+    private fun showLiveOffsetDialog() {
+        val options = arrayOf(
+            "Как в потоке (минимальная)",
+            "10 сек",
+            "20 сек — слабый интернет",
+            "30 сек — очень слабый интернет",
+            "60 сек"
+        )
+        val values = intArrayOf(0, 10, 20, 30, 60)
+        AlertDialog.Builder(this).setTitle("Задержка от эфира")
+            .setItems(options) { _, which ->
+                Store.liveOffsetSec = values[which]
+                rebuildPlayerKeepingChannel()
+                toast("Задержка от эфира: ${Quality.liveOffsetLabel()}")
+            }.show()
+    }
+
+    /** Поведение при обрыве: сколько раз и как настойчиво переподключаться. */
+    private fun showRetryDialog() {
+        val options = arrayOf(
+            "Быстро сдаваться (сразу к другому источнику)",
+            "Обычно",
+            "Упорно — для слабого интернета"
+        )
+        val values = arrayOf("fast", "normal", "persistent")
+        AlertDialog.Builder(this).setTitle("При обрыве связи")
+            .setItems(options) { _, which ->
+                Store.retryMode = values[which]
+                rebuildPlayerKeepingChannel()
+                toast("При обрыве: ${Quality.retryLabel()}")
+            }.show()
+    }
+
+    /** Тип декодера: аппаратный быстрее, программный устойчивее. */
+    private fun showDecoderDialog() {
+        val options = arrayOf(
+            "Аппаратный (HW) — быстрый, по умолчанию",
+            "Программный (SW) — если картинка сыпется"
+        )
+        val values = arrayOf("hw", "sw")
+        AlertDialog.Builder(this).setTitle("Тип декодера")
+            .setItems(options) { _, which ->
+                Store.decoder = values[which]
+                rebuildPlayerKeepingChannel()
+                toast("Декодер: ${Quality.decoderLabel()}")
             }.show()
     }
 
@@ -1303,7 +1420,7 @@ class PlayerActivity : Activity() {
         AlertDialog.Builder(this).setTitle("Размер буфера")
             .setItems(options) { _, which ->
                 Store.bufferSec = values[which]
-                buildPlayer(); currentChannel?.let { play(it) }
+                rebuildPlayerKeepingChannel()
                 toast("Буфер: ${values[which]} сек")
             }.show()
     }

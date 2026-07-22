@@ -4,10 +4,10 @@ plugins {
 }
 
 // versionCode / versionName приходят из GitHub Actions:
-//   -PversionCode=<номер сборки>  -PversionName=1.0.<номер сборки>
+//   -PversionCode=<номер сборки>  -PversionName=2.0.<номер сборки>
 // Локально (без параметров) подставляются значения по умолчанию.
 def vCode = project.hasProperty('versionCode') ? project.versionCode.toInteger() : 1
-def vName = project.hasProperty('versionName') ? project.versionName : "1.0"
+def vName = project.hasProperty('versionName') ? project.versionName : "2.0"
 
 android {
     namespace 'ru.bqd.iptv'

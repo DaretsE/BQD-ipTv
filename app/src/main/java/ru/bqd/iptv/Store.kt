@@ -172,6 +172,32 @@ object Store {
         get() = prefs.getInt("buffer_sec", 15)
         set(v) { prefs.edit().putInt("buffer_sec", v).apply() }
 
+    // ---------- Качество трансляции (реальные параметры воспроизведения) ----------
+
+    /**
+     * Отставание от прямого эфира, сек. 0 — как отдаёт поток.
+     * Самый действенный параметр при слабом интернете: запас времени
+     * позволяет пережить провалы связи без остановки картинки.
+     */
+    var liveOffsetSec: Int
+        get() = prefs.getInt("live_offset_sec", 0)
+        set(v) { prefs.edit().putInt("live_offset_sec", v).apply() }
+
+    /** Тип декодера: "hw" — аппаратный (по умолчанию), "sw" — программный. */
+    var decoder: String
+        get() = prefs.getString("decoder", "hw") ?: "hw"
+        set(v) { prefs.edit().putString("decoder", v).apply() }
+
+    /** Автофреймрейт: подстройка частоты экрана под частоту кадров потока. */
+    var afr: Boolean
+        get() = prefs.getBoolean("afr", false)
+        set(v) { prefs.edit().putBoolean("afr", v).apply() }
+
+    /** Поведение при обрыве связи: "fast" | "normal" | "persistent". */
+    var retryMode: String
+        get() = prefs.getString("retry_mode", "normal") ?: "normal"
+        set(v) { prefs.edit().putString("retry_mode", v).apply() }
+
     // ---------- Избранное ----------
     fun getFavorites(): MutableList<Pair<String, String>> {
         val out = ArrayList<Pair<String, String>>()
