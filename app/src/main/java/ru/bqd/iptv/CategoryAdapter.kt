@@ -8,7 +8,7 @@ import android.view.ViewGroup
 import android.widget.BaseAdapter
 import android.widget.TextView
 
-/** Пункт левого меню. type: SETTINGS / ALL / GROUP */
+/** Пункт левого меню. type: SETTINGS / SEARCH / ALL / GROUP */
 data class CatItem(val title: String, val count: Int, val type: String, val group: String? = null)
 
 class CategoryAdapter(
@@ -22,26 +22,38 @@ class CategoryAdapter(
     override fun getItem(p: Int) = items[p]
     override fun getItemId(p: Int) = p.toLong()
 
+    /** Иконка пункта: служебные — фиксированные, группы — по смыслу названия. */
+    private fun iconName(item: CatItem): String = when (item.type) {
+        "SETTINGS" -> "settings"
+        "SEARCH" -> "search"
+        "ALL" -> if (item.title.contains("избранн", true)) "star" else "apps"
+        else -> GroupIcons.iconFor(item.group ?: item.title)
+    }
+
     override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
         val v = convertView ?: LayoutInflater.from(ctx).inflate(R.layout.item_category, parent, false)
         val item = items[position]
+        val icon = v.findViewById<TextView>(R.id.catIcon)
         val left = v.findViewById<TextView>(R.id.catName)
         val right = v.findViewById<TextView>(R.id.catCount)
-        val root = v.findViewById<View>(R.id.catRoot)
 
+        IconFont.apply(icon, iconName(item))
         left.text = item.title
-        if (item.type == "SETTINGS") {
-            right.text = "›"
-            root.setBackgroundColor(Color.parseColor("#243447"))
-            left.setTextColor(Color.parseColor("#FFC107"))
-        } else if (item.type == "SEARCH") {
-            right.text = "›"
-            root.setBackgroundColor(Color.parseColor("#1B3A2E"))
-            left.setTextColor(Color.parseColor("#7FE3A1"))
+
+        if (item.count > 0) {
+            right.text = item.count.toString()
+            right.visibility = View.VISIBLE
         } else {
-            right.text = if (item.count > 0) item.count.toString() else ""
-            root.setBackgroundColor(Color.TRANSPARENT)
-            left.setTextColor(Color.WHITE)
+            right.text = ""
+            right.visibility = View.GONE
+        }
+
+        // служебные пункты отличаем цветом иконки; фон строки больше не красим —
+        // выделение рисует общий фокус списка
+        when (item.type) {
+            "SETTINGS" -> icon.setTextColor(Color.parseColor("#F0B24A"))
+            "SEARCH" -> icon.setTextColor(Color.parseColor("#A8E05F"))
+            else -> icon.setTextColor(Color.parseColor("#63D4E2"))
         }
         return v
     }

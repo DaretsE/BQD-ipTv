@@ -888,12 +888,12 @@ class PlayerActivity : Activity() {
     }
 
     private fun refreshLeftMenu() {
-        val title = if (menuPlaylistIdx == -1) "★ Избранное" else playlists.getOrNull(menuPlaylistIdx)?.name ?: "—"
+        val title = if (menuPlaylistIdx == -1) "Избранное" else playlists.getOrNull(menuPlaylistIdx)?.name ?: "—"
         plSelector.text = "◀   $title   ▶"
 
         val items = ArrayList<CatItem>()
-        items.add(CatItem("⚙  Настройки", 0, "SETTINGS"))   // п.7: наверху и выделено
-        items.add(CatItem("🔎  Поиск передачи", 0, "SEARCH"))
+        items.add(CatItem("Настройки", 0, "SETTINGS"))   // иконка подставляется адаптером
+        items.add(CatItem("Поиск передачи", 0, "SEARCH"))
         if (menuPlaylistIdx == -1) {
             items.add(CatItem("Все избранные", favoriteChannels().size, "ALL"))
         } else {

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Палитра BQDiptv 2.x — teal / navy glass (перенесена из HTML-прототипа).
+    Имена соответствуют переменным прототипа, чтобы правки было легко сверять.
+-->
+<resources>
+    <!-- фон -->
+    <color name="bg0">#04121A</color>
+    <color name="bg1">#082029</color>
+    <color name="bg2">#0C2C35</color>
+
+    <!-- стеклянные панели -->
+    <color name="panel">#CC092028</color>
+    <color name="panel_solid">#0B262F</color>
+    <color name="card_bg">#0F2A33</color>
+    <color name="card2">#123642</color>
+
+    <!-- teal-акцент -->
+    <color name="accent">#45B8C7</color>
+    <color name="accent2">#63D4E2</color>
+    <color name="accent_deep">#2E8B98</color>
+    <color name="accent_glow">#4D63D4E2</color>
+
+    <!-- фокус -->
+    <color name="focus_fill">#2E45B8C7</color>
+    <color name="focus_stroke">#63D4E2</color>
+
+    <!-- салатовое (добавить в избранное) -->
+    <color name="lime">#A8E05F</color>
+    <color name="lime_fill">#26A8E05F</color>
+
+    <!-- красное (удалить) -->
+    <color name="danger">#FF8A8A</color>
+    <color name="danger_fill">#26F0663F</color>
+
+    <!-- текст -->
+    <color name="text">#EEF6F8</color>
+    <color name="text2">#C6D7DD</color>
+    <color name="text_dim">#8BA4AD</color>
+    <color name="text_dim2">#7793A0</color>
+    <color name="text_dim3">#8AA6B1</color>
+
+    <!-- статусы -->
+    <color name="green">#31C07A</color>
+    <color name="amber">#F0B24A</color>
+    <color name="red">#F0663F</color>
+    <color name="live_red">#FF5A5A</color>
+
+    <color name="hairline">#12FFFFFF</color>
+    <color name="overlay_dark">#F0071A22</color>
+    <color name="overlay_soft">#80031017</color>
+</resources>

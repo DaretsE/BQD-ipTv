@@ -35,12 +35,12 @@
 
             <TextView android:id="@+id/osdChannel"
                 android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:textColor="#FFFFFF" android:textSize="24sp" android:textStyle="bold"
+                android:textColor="@color/text" android:textSize="24sp" android:textStyle="bold"
                 android:singleLine="true" android:ellipsize="end" />
 
             <TextView android:id="@+id/osdProgram"
                 android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:textColor="#CCCCCC" android:textSize="17sp"
+                android:textColor="@color/text2" android:textSize="17sp"
                 android:singleLine="true" android:ellipsize="end" />
 
             <ProgressBar android:id="@+id/osdProgress"
@@ -55,43 +55,43 @@
 
             <TextView android:id="@+id/osdBadge"
                 android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:background="@drawable/badge_bg" android:textColor="#FFFFFF"
+                android:background="@drawable/badge_bg" android:textColor="@color/text"
                 android:textSize="14sp" android:textStyle="bold" android:visibility="gone" />
 
             <TextView android:id="@+id/osdClock"
                 android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:layout_marginTop="6dp" android:textColor="#FFFFFF" android:textSize="20sp" />
+                android:layout_marginTop="6dp" android:textColor="@color/text" android:textSize="20sp" />
         </LinearLayout>
     </LinearLayout>
 
     <TextView android:id="@+id/favStar"
         android:layout_width="wrap_content" android:layout_height="wrap_content"
         android:layout_gravity="center" android:textSize="120sp" android:text="★"
-        android:textColor="#FFC107" android:visibility="gone" />
+        android:textColor="@color/accent2" android:visibility="gone" />
 
     <TextView android:id="@+id/errorMsg"
         android:layout_width="wrap_content" android:layout_height="wrap_content"
         android:layout_gravity="center" android:background="@drawable/toast_bg"
-        android:textColor="#FFFFFF" android:textSize="18sp" android:visibility="gone" />
+        android:textColor="@color/text" android:textSize="18sp" android:visibility="gone" />
 
     <FrameLayout
         android:id="@+id/browserOverlay"
         android:layout_width="match_parent" android:layout_height="match_parent"
-        android:background="#66000000" android:visibility="gone">
+        android:background="@color/overlay_soft" android:visibility="gone">
 
         <LinearLayout
             android:id="@+id/browserList"
             android:layout_width="520dp" android:layout_height="match_parent"
-            android:orientation="vertical" android:background="@drawable/panel_bg" android:padding="14dp">
+            android:orientation="vertical" android:background="@drawable/panel_bg_left" android:padding="14dp">
 
             <TextView android:id="@+id/browserHeader"
                 android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:textColor="#F5B50A" android:textSize="20sp" android:textStyle="bold"
+                android:textColor="@color/accent2" android:textSize="20sp" android:textStyle="bold"
                 android:paddingBottom="10dp" android:singleLine="true" android:ellipsize="end" />
 
             <ListView android:id="@+id/browserListView"
                 android:layout_width="match_parent" android:layout_height="match_parent"
-                android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true" android:divider="#16FFFFFF" android:dividerHeight="1dp"
+                android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true" android:divider="@color/hairline" android:dividerHeight="1dp"
                 android:scrollbars="none" />
         </LinearLayout>
 
@@ -117,12 +117,12 @@
 
                     <TextView android:id="@+id/prevName"
                         android:layout_width="match_parent" android:layout_height="wrap_content"
-                        android:textColor="#FFFFFF" android:textSize="22sp" android:textStyle="bold"
+                        android:textColor="@color/text" android:textSize="22sp" android:textStyle="bold"
                         android:singleLine="true" android:ellipsize="end" />
 
                     <TextView android:id="@+id/prevNow"
                         android:layout_width="match_parent" android:layout_height="wrap_content"
-                        android:textColor="#DDE6F0" android:textSize="16sp"
+                        android:textColor="@color/text2" android:textSize="16sp"
                         android:singleLine="true" android:ellipsize="end" />
 
                     <ProgressBar android:id="@+id/prevProgress"
@@ -132,14 +132,14 @@
 
                     <TextView android:id="@+id/prevRemain"
                         android:layout_width="match_parent" android:layout_height="wrap_content"
-                        android:textColor="#F5B50A" android:textSize="13sp"
+                        android:textColor="@color/accent2" android:textSize="13sp"
                         android:layout_marginTop="3dp" android:gravity="end" />
                 </LinearLayout>
             </LinearLayout>
 
             <TextView android:id="@+id/prevNext"
                 android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:layout_marginTop="10dp" android:textColor="#90A2B8" android:textSize="14sp"
+                android:layout_marginTop="10dp" android:textColor="@color/text_dim" android:textSize="14sp"
                 android:singleLine="true" android:ellipsize="end" />
         </LinearLayout>
     </FrameLayout>
@@ -148,46 +148,46 @@
         android:id="@+id/leftMenu"
         android:layout_width="380dp" android:layout_height="match_parent"
         android:layout_gravity="left" android:orientation="vertical"
-        android:background="@drawable/panel_bg" android:padding="16dp" android:visibility="gone">
+        android:background="@drawable/panel_bg_left" android:padding="16dp" android:visibility="gone">
 
         <TextView android:id="@+id/plSelector"
             android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:gravity="center" android:textColor="#FFFFFF" android:textSize="20sp"
-            android:textStyle="bold" android:background="#223B82F6" android:padding="12dp" />
+            android:gravity="center" android:textColor="@color/text" android:textSize="20sp"
+            android:textStyle="bold" android:background="@drawable/plsel_bg" android:padding="12dp" />
 
         <TextView
             android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:gravity="center" android:textColor="#88FFFFFF" android:textSize="12sp"
+            android:gravity="center" android:textColor="@color/text_dim" android:textSize="12sp"
             android:paddingTop="4dp" android:paddingBottom="8dp" android:text="◀ ▶ — смена плейлиста" />
 
         <ListView android:id="@+id/catList"
             android:layout_width="match_parent" android:layout_height="match_parent"
-            android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true" android:divider="#16FFFFFF" android:dividerHeight="1dp" />
+            android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true" android:divider="@color/hairline" android:dividerHeight="1dp" />
     </LinearLayout>
 
     <LinearLayout
         android:id="@+id/rightPanel"
         android:layout_width="500dp" android:layout_height="match_parent"
         android:layout_gravity="right" android:orientation="vertical"
-        android:background="@drawable/panel_bg" android:padding="16dp" android:visibility="gone">
+        android:background="@drawable/panel_bg_right" android:padding="16dp" android:visibility="gone">
 
         <TextView android:id="@+id/epgHeader"
             android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:textColor="#F5B50A" android:textSize="20sp" android:textStyle="bold"
+            android:textColor="@color/accent2" android:textSize="20sp" android:textStyle="bold"
             android:singleLine="true" android:ellipsize="end" />
 
         <LinearLayout
             android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="vertical" android:background="#14223B"
+            android:orientation="vertical" android:background="@drawable/now_block_bg"
             android:padding="12dp" android:layout_marginTop="10dp" android:layout_marginBottom="10dp">
 
             <TextView android:id="@+id/nowTitle"
                 android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:textColor="#FFFFFF" android:textSize="18sp" android:textStyle="bold" />
+                android:textColor="@color/text" android:textSize="18sp" android:textStyle="bold" />
 
             <TextView android:id="@+id/nowTime"
                 android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:textColor="#9FB3CC" android:textSize="13sp" android:layout_marginTop="2dp" />
+                android:textColor="@color/text_dim" android:textSize="13sp" android:layout_marginTop="2dp" />
 
             <ProgressBar android:id="@+id/nowProgress"
                 style="?android:attr/progressBarStyleHorizontal"
@@ -196,50 +196,50 @@
 
             <TextView android:id="@+id/nowRemain"
                 android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:textColor="#F5B50A" android:textSize="13sp"
+                android:textColor="@color/accent2" android:textSize="13sp"
                 android:layout_marginTop="4dp" android:gravity="end" />
 
             <TextView android:id="@+id/nowDesc"
                 android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:textColor="#C6D2E0" android:textSize="14sp" android:layout_marginTop="8dp"
+                android:textColor="@color/text2" android:textSize="14sp" android:layout_marginTop="8dp"
                 android:maxLines="5" android:ellipsize="end" />
         </LinearLayout>
 
         <TextView
             android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:text="ПРОГРАММА ПЕРЕДАЧ" android:textColor="#7F93AC" android:textSize="12sp"
+            android:text="ПРОГРАММА ПЕРЕДАЧ" android:textColor="@color/text_dim2" android:textSize="12sp"
             android:paddingBottom="6dp" />
 
         <ListView android:id="@+id/epgList"
             android:layout_width="match_parent" android:layout_height="match_parent"
-            android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true" android:divider="#16FFFFFF" android:dividerHeight="1dp" />
+            android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true" android:divider="@color/hairline" android:dividerHeight="1dp" />
     </LinearLayout>
 
     <LinearLayout
         android:id="@+id/setupOverlay"
         android:layout_width="match_parent" android:layout_height="match_parent"
         android:orientation="vertical" android:gravity="center"
-        android:background="#F00B0F14" android:padding="24dp" android:visibility="gone">
+        android:background="@color/overlay_dark" android:padding="24dp" android:visibility="gone">
 
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="BQDiptv" android:textColor="#FFFFFF" android:textSize="40sp" android:textStyle="bold" />
+            android:text="BQDiptv" android:textColor="@color/text" android:textSize="40sp" android:textStyle="bold" />
 
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:layout_marginTop="18dp" android:gravity="center" android:textColor="#CCCCCC" android:textSize="18sp"
+            android:layout_marginTop="18dp" android:gravity="center" android:textColor="@color/text2" android:textSize="18sp"
             android:text="Отсканируйте QR-код телефоном или откройте адрес в браузере\n(телефон и ТВ должны быть в одной Wi-Fi сети)" />
 
         <ImageView android:id="@+id/qrImage"
             android:layout_width="320dp" android:layout_height="320dp"
-            android:layout_marginTop="20dp" android:background="#FFFFFF" android:padding="10dp"
+            android:layout_marginTop="20dp" android:background="@color/text" android:padding="10dp"
             android:scaleType="fitCenter" />
 
         <TextView android:id="@+id/setupUrl"
             android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:layout_marginTop="18dp" android:background="@drawable/toast_bg"
-            android:textColor="#FFC107" android:textSize="30sp" android:textStyle="bold" />
+            android:textColor="@color/accent2" android:textSize="30sp" android:textStyle="bold" />
 
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:layout_marginTop="16dp" android:gravity="center" android:textColor="#9FB3CC" android:textSize="16sp"
+            android:layout_marginTop="16dp" android:gravity="center" android:textColor="@color/text_dim" android:textSize="16sp"
             android:text="На странице настройки добавьте плейлист M3U — эфир запустится сам.\nНажмите «Назад», чтобы закрыть. Снова открыть — в Настройках." />
     </LinearLayout>
 
@@ -247,14 +247,14 @@
         android:id="@+id/modePicker"
         android:layout_width="match_parent" android:layout_height="match_parent"
         android:orientation="vertical" android:gravity="center"
-        android:background="#F00B0F14" android:padding="24dp" android:visibility="gone">
+        android:background="@color/overlay_dark" android:padding="24dp" android:visibility="gone">
 
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="BQDiptv" android:textColor="#FFFFFF" android:textSize="40sp" android:textStyle="bold" />
+            android:text="BQDiptv" android:textColor="@color/text" android:textSize="40sp" android:textStyle="bold" />
 
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:layout_marginTop="14dp" android:layout_marginBottom="34dp"
-            android:textColor="#AEBDD0" android:textSize="19sp" android:text="Как вы будете пользоваться приложением?" />
+            android:textColor="@color/text_dim" android:textSize="19sp" android:text="Как вы будете пользоваться приложением?" />
 
         <LinearLayout android:id="@+id/modeButtons"
             android:layout_width="wrap_content" android:layout_height="wrap_content"
@@ -262,19 +262,19 @@
 
             <TextView android:id="@+id/modeTv"
                 android:layout_width="220dp" android:layout_height="160dp"
-                android:gravity="center" android:background="#1D2530"
-                android:textColor="#FFFFFF" android:textSize="22sp" android:text="📺\nТелевизор\n(пульт)"
+                android:gravity="center" android:background="@color/card_bg"
+                android:textColor="@color/text" android:textSize="22sp" android:text="📺\nТелевизор\n(пульт)"
                 android:focusable="true" android:layout_margin="10dp" />
 
             <TextView android:id="@+id/modePhone"
                 android:layout_width="220dp" android:layout_height="160dp"
-                android:gravity="center" android:background="#1D2530"
-                android:textColor="#FFFFFF" android:textSize="22sp" android:text="📱\nТелефон / планшет\n(сенсор)"
+                android:gravity="center" android:background="@color/card_bg"
+                android:textColor="@color/text" android:textSize="22sp" android:text="📱\nТелефон / планшет\n(сенсор)"
                 android:focusable="true" android:layout_margin="10dp" />
         </LinearLayout>
 
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:layout_marginTop="20dp" android:textColor="#7F93AC" android:textSize="14sp"
+            android:layout_marginTop="20dp" android:textColor="@color/text_dim2" android:textSize="14sp"
             android:text="Это можно поменять позже в настройках" />
     </LinearLayout>
 
@@ -282,7 +282,7 @@
         android:id="@+id/phoneBar"
         android:layout_width="match_parent" android:layout_height="wrap_content"
         android:layout_gravity="bottom" android:orientation="horizontal"
-        android:background="#CC0B0F14" android:paddingTop="10dp" android:paddingBottom="10dp"
+        android:background="#CC071923" android:paddingTop="10dp" android:paddingBottom="10dp"
         android:visibility="gone">
 
         <TextView android:id="@+id/pbMenu" style="@style/PhoneBtn" android:text="☰\nМеню" />
@@ -296,7 +296,7 @@
     <ScrollView
         android:id="@+id/phoneSetup"
         android:layout_width="match_parent" android:layout_height="match_parent"
-        android:background="#F00B0F14" android:visibility="gone">
+        android:background="@color/overlay_dark" android:visibility="gone">
 
         <LinearLayout
             android:layout_width="match_parent" android:layout_height="wrap_content"
@@ -304,37 +304,37 @@
             android:padding="28dp">
 
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:text="BQDiptv" android:textColor="#FFFFFF" android:textSize="38sp" android:textStyle="bold"
+                android:text="BQDiptv" android:textColor="@color/text" android:textSize="38sp" android:textStyle="bold"
                 android:layout_marginTop="20dp" />
 
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:layout_marginTop="14dp" android:gravity="center"
-                android:textColor="#AEBDD0" android:textSize="17sp"
+                android:textColor="@color/text_dim" android:textSize="17sp"
                 android:text="Для начала добавьте свой плейлист (ссылка M3U).\nEPG (телепрограмма) — по желанию." />
 
             <TextView android:id="@+id/psAddPlaylist"
                 android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:layout_marginTop="26dp" android:gravity="center"
-                android:background="#3B82F6" android:textColor="#FFFFFF" android:textSize="20sp" android:textStyle="bold"
+                android:background="@color/accent" android:textColor="@color/text" android:textSize="20sp" android:textStyle="bold"
                 android:paddingTop="18dp" android:paddingBottom="18dp"
                 android:text="➕  Добавить плейлист (M3U)" android:focusable="true" />
 
             <TextView android:id="@+id/psAddEpg"
                 android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:layout_marginTop="14dp" android:gravity="center"
-                android:background="#1D2530" android:textColor="#FFFFFF" android:textSize="18sp"
+                android:background="@color/card_bg" android:textColor="@color/text" android:textSize="18sp"
                 android:paddingTop="16dp" android:paddingBottom="16dp"
                 android:text="🗓  Добавить EPG (телепрограмму)" android:focusable="true" />
 
             <TextView android:id="@+id/phoneSetupStatus"
                 android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:layout_marginTop="20dp" android:gravity="center"
-                android:textColor="#9FB3CC" android:textSize="15sp" />
+                android:textColor="@color/text_dim" android:textSize="15sp" />
 
             <TextView android:id="@+id/psStart"
                 android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:layout_marginTop="24dp" android:gravity="center"
-                android:background="#1DB954" android:textColor="#FFFFFF" android:textSize="20sp" android:textStyle="bold"
+                android:background="@color/green" android:textColor="@color/text" android:textSize="20sp" android:textStyle="bold"
                 android:paddingTop="18dp" android:paddingBottom="18dp"
                 android:text="▶  Начать просмотр" android:focusable="true" />
         </LinearLayout>
@@ -344,20 +344,20 @@
         android:id="@+id/searchOverlay"
         android:layout_width="match_parent" android:layout_height="match_parent"
         android:orientation="vertical"
-        android:background="#F00B0F14" android:padding="20dp" android:visibility="gone">
+        android:background="@color/overlay_dark" android:padding="20dp" android:visibility="gone">
 
         <TextView
             android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="🔎  Поиск передачи" android:textColor="#FFFFFF"
+            android:text="🔎  Поиск передачи" android:textColor="@color/text"
             android:textSize="26sp" android:textStyle="bold" android:paddingBottom="12dp" />
 
         <EditText
             android:id="@+id/searchInput"
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:hint="Название фильма или передачи"
-            android:textColor="#FFFFFF" android:textColorHint="#7F93AC"
+            android:textColor="@color/text" android:textColorHint="@color/text_dim2"
             android:textSize="20sp" android:padding="14dp"
-            android:background="#1D2530"
+            android:background="@color/card_bg"
             android:singleLine="true"
             android:imeOptions="actionSearch"
             android:inputType="text" />
@@ -365,13 +365,13 @@
         <TextView
             android:id="@+id/searchStatus"
             android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:textColor="#9FB3CC" android:textSize="14sp"
+            android:textColor="@color/text_dim" android:textSize="14sp"
             android:paddingTop="10dp" android:paddingBottom="6dp" />
 
         <ListView
             android:id="@+id/searchResults"
             android:layout_width="match_parent" android:layout_height="match_parent"
-            android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true" android:divider="#16FFFFFF" android:dividerHeight="1dp"
+            android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true" android:divider="@color/hairline" android:dividerHeight="1dp"
             android:scrollbars="none" />
     </LinearLayout>
 
@@ -382,6 +382,6 @@
 
         <TextView android:id="@+id/ssClock"
             android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:textColor="#666666" android:textSize="56sp" />
+            android:textColor="#3C5A63" android:textSize="56sp" />
     </FrameLayout>
 </FrameLayout>

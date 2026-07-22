@@ -1,27 +1,61 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Подсветка выделенной строки: заливка + яркая teal-обводка (имитация свечения). -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_pressed="true">
-        <shape android:shape="rectangle">
-            <solid android:color="#662E6BD6" />
-            <stroke android:width="3dp" android:color="#5B9DFF" />
-        </shape>
+        <layer-list>
+            <item>
+                <shape android:shape="rectangle">
+                    <solid android:color="#4463D4E2" />
+                    <corners android:radius="14dp" />
+                </shape>
+            </item>
+            <item>
+                <shape android:shape="rectangle">
+                    <solid android:color="@android:color/transparent" />
+                    <stroke android:width="2dp" android:color="@color/focus_stroke" />
+                    <corners android:radius="14dp" />
+                </shape>
+            </item>
+        </layer-list>
     </item>
     <item android:state_focused="true">
-        <shape android:shape="rectangle">
-            <solid android:color="#552E6BD6" />
-            <stroke android:width="3dp" android:color="#5B9DFF" />
-        </shape>
+        <layer-list>
+            <item>
+                <shape android:shape="rectangle">
+                    <solid android:color="@color/focus_fill" />
+                    <corners android:radius="14dp" />
+                </shape>
+            </item>
+            <item>
+                <shape android:shape="rectangle">
+                    <solid android:color="@android:color/transparent" />
+                    <stroke android:width="2dp" android:color="@color/focus_stroke" />
+                    <corners android:radius="14dp" />
+                </shape>
+            </item>
+        </layer-list>
     </item>
     <item android:state_selected="true">
-        <shape android:shape="rectangle">
-            <solid android:color="#552E6BD6" />
-            <stroke android:width="3dp" android:color="#5B9DFF" />
-        </shape>
+        <layer-list>
+            <item>
+                <shape android:shape="rectangle">
+                    <solid android:color="@color/focus_fill" />
+                    <corners android:radius="14dp" />
+                </shape>
+            </item>
+            <item>
+                <shape android:shape="rectangle">
+                    <solid android:color="@android:color/transparent" />
+                    <stroke android:width="2dp" android:color="@color/focus_stroke" />
+                    <corners android:radius="14dp" />
+                </shape>
+            </item>
+        </layer-list>
     </item>
     <item android:state_activated="true">
         <shape android:shape="rectangle">
-            <solid android:color="#552E6BD6" />
-            <stroke android:width="3dp" android:color="#5B9DFF" />
+            <solid android:color="#1A63D4E2" />
+            <corners android:radius="14dp" />
         </shape>
     </item>
     <item>
