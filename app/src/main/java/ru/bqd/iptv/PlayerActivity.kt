@@ -55,6 +55,14 @@ class PlayerActivity : Activity() {
     private lateinit var osdProgress: ProgressBar
     private lateinit var osdBadge: TextView
     private lateinit var osdClock: TextView
+    private lateinit var osdLive: TextView
+    private lateinit var osdRemain: TextView
+    private lateinit var osdNext: TextView
+    private lateinit var osdButtons: View
+    private lateinit var osdBtnFav: TextView
+    private lateinit var osdBtnPrev: TextView
+    private lateinit var osdBtnNext: TextView
+    private lateinit var osdBtnLast: TextView
     private lateinit var favStar: TextView
     private lateinit var errorMsg: TextView
 
@@ -111,9 +119,20 @@ class PlayerActivity : Activity() {
     private var zapIndex = 0
     private var currentChannel: Channel? = null
 
+    /**
+     * Предыдущий просмотренный канал вместе с источником запуска.
+     * Хранится не только индекс, но и плейлист с группой — иначе возврат
+     * «на прошлый канал» ломался при переходе между разными списками.
+     */
+    private data class ChannelRef(val plIdx: Int, val category: String?, val url: String)
+    private var prevRef: ChannelRef? = null
+
     private var curPlaylistIdx = 0
     private var curCategory: String? = null
     private var menuPlaylistIdx = 0
+
+    /** Текущие пункты левого меню — нужны для прыжка на «Настройки». */
+    private var catItemsList: List<CatItem> = emptyList()
 
     private var panel = Panel.NONE
     private var webServer: WebConfigServer? = null
@@ -136,6 +155,9 @@ class PlayerActivity : Activity() {
 
     // если программа в кэше моложе этого срока — при старте не перегружаем её по сети
     private val EPG_FRESH_MS = 6L * 3600 * 1000
+
+    /** Плашка канала скрывается целиком через это время бездействия. */
+    private val OSD_TIMEOUT_MS = 3500L
 
     // ------------------------------------------------------------ lifecycle
 
@@ -179,6 +201,15 @@ class PlayerActivity : Activity() {
         osdProgress = findViewById(R.id.osdProgress)
         osdBadge = findViewById(R.id.osdBadge)
         osdClock = findViewById(R.id.osdClock)
+        osdLive = findViewById(R.id.osdLive)
+        osdRemain = findViewById(R.id.osdRemain)
+        osdNext = findViewById(R.id.osdNext)
+        osdButtons = findViewById(R.id.osdButtons)
+        osdBtnFav = findViewById(R.id.osdBtnFav)
+        osdBtnPrev = findViewById(R.id.osdBtnPrev)
+        osdBtnNext = findViewById(R.id.osdBtnNext)
+        osdBtnLast = findViewById(R.id.osdBtnLast)
+        setupOsdButtons()
         favStar = findViewById(R.id.favStar)
         errorMsg = findViewById(R.id.errorMsg)
         browserOverlay = findViewById(R.id.browserOverlay)
@@ -560,6 +591,11 @@ class PlayerActivity : Activity() {
 
     private fun play(ch: Channel) {
         if (playerReleased) buildPlayer()
+        // запоминаем, откуда и что смотрели, до смены канала
+        val prev = currentChannel
+        if (prev != null && prev.url != ch.url) {
+            prevRef = ChannelRef(curPlaylistIdx, curCategory, prev.url)
+        }
         isCatchupPlayback = false
         currentChannel = ch
         errorMsg.visibility = View.GONE
@@ -627,35 +663,116 @@ class PlayerActivity : Activity() {
 
     // ------------------------------------------------------------ OSD
 
-    private val hideOsdRunnable = Runnable { osdPanel.visibility = View.GONE }
+    /** Плашка целиком (информация + кнопки) прячется одним таймером. */
+    private val hideOsdRunnable = Runnable { hideOsd() }
 
-    private fun showOsd(ch: Channel) {
+    private fun hideOsd() {
+        osdPanel.visibility = View.GONE
+        osdButtons.visibility = View.GONE
+        osdButtonsShown = false
+    }
+
+    private var osdButtonsShown = false
+
+    /** Сброс таймера авто-скрытия: любое действие продлевает показ. */
+    private fun restartOsdTimer() {
+        handler.removeCallbacks(hideOsdRunnable)
+        handler.postDelayed(hideOsdRunnable, OSD_TIMEOUT_MS)
+    }
+
+    private fun showOsd(ch: Channel) = showOsd(ch, withButtons = false)
+
+    /**
+     * Единая плашка канала: одинаковая и при OK, и при перелистывании.
+     * Отличие только в том, показывать ли кнопки действий.
+     */
+    private fun showOsd(ch: Channel, withButtons: Boolean) {
         val num = if (ch.chno.isNotEmpty()) ch.chno else (zapIndex + 1).toString()
         osdChannel.text = "$num • ${ch.name}"
         osdClock.text = timeFmt.format(Date())
+
         val up = ch.name.uppercase()
         when {
             up.contains("4K") || up.contains("UHD") -> { osdBadge.text = "4K"; osdBadge.visibility = View.VISIBLE }
             up.contains("HD") -> { osdBadge.text = "HD"; osdBadge.visibility = View.VISIBLE }
             else -> osdBadge.visibility = View.GONE
         }
+        // индикатор эфира живёт только внутри плашки и только для живого потока
+        osdLive.visibility = if (isCatchupPlayback) View.GONE else View.VISIBLE
+
         ImageLoader.load(if (ch.logo.isNotEmpty()) ch.logo else EpgManager.iconFor(ch), osdLogo)
         updateOsdProgram(ch)
+
         osdPanel.visibility = View.VISIBLE
-        handler.removeCallbacks(hideOsdRunnable)
-        handler.postDelayed(hideOsdRunnable, 4000)
+        if (withButtons) showOsdButtons() else { osdButtons.visibility = View.GONE; osdButtonsShown = false }
+        restartOsdTimer()
+    }
+
+    private fun showOsdButtons() {
+        updateFavButtonText()
+        osdButtons.visibility = View.VISIBLE
+        osdButtonsShown = true
+        osdBtnFav.requestFocus()
+    }
+
+    /** Текст кнопки избранного; ширина кнопки фиксирована, соседние не смещаются. */
+    private fun updateFavButtonText() {
+        val ch = currentChannel
+        osdBtnFav.text = if (ch != null && Store.isFavorite(ch.url)) "Из избранного" else "В избранное"
+    }
+
+    private fun setupOsdButtons() {
+        osdBtnFav.setOnClickListener {
+            toggleFavoriteCurrent(); updateFavButtonText(); restartOsdTimer()
+        }
+        osdBtnPrev.setOnClickListener { zap(-1); restartOsdTimer() }
+        osdBtnNext.setOnClickListener { zap(1); restartOsdTimer() }
+        osdBtnLast.setOnClickListener { gotoPrevChannel(); restartOsdTimer() }
+        // навигация по кнопкам продлевает показ плашки
+        val keepAlive = View.OnFocusChangeListener { _, hasFocus -> if (hasFocus) restartOsdTimer() }
+        osdBtnFav.onFocusChangeListener = keepAlive
+        osdBtnPrev.onFocusChangeListener = keepAlive
+        osdBtnNext.onFocusChangeListener = keepAlive
+        osdBtnLast.onFocusChangeListener = keepAlive
+    }
+
+    /** Переход на прошлый просмотренный канал — вместе с его плейлистом и группой. */
+    private fun gotoPrevChannel() {
+        val ref = prevRef
+        if (ref == null) { toast("Прошлый канал не запомнен"); return }
+        val backTo = currentChannel?.let { ChannelRef(curPlaylistIdx, curCategory, it.url) }
+
+        curPlaylistIdx = ref.plIdx
+        curCategory = ref.category
+        rebuildZapList(keepCurrent = false)
+        val idx = zapList.indexOfFirst { it.url == ref.url }
+        if (idx < 0) { toast("Прошлый канал недоступен"); return }
+        zapIndex = idx
+        play(zapList[idx])
+        // меняем местами: следующий вызов вернёт туда, откуда пришли
+        prevRef = backTo
+        showOsd(zapList[idx], withButtons = osdButtonsShown)
     }
 
     private fun updateOsdProgram(ch: Channel) {
         val prog = EpgManager.currentFor(ch)
         if (prog != null) {
-            osdProgram.text = prog.title
+            osdProgram.text = "Сейчас: ${prog.title}"
             val pct = ((System.currentTimeMillis() - prog.start) * 100 / maxOf(1, prog.stop - prog.start)).toInt()
             osdProgress.progress = pct.coerceIn(0, 100)
             osdProgress.visibility = View.VISIBLE
+            osdRemain.text = remainText(prog.stop)
+            osdRemain.visibility = View.VISIBLE
+            val next = EpgManager.nextFor(ch)
+            if (next != null) {
+                osdNext.text = "Далее: ${next.title} · ${timeFmt.format(Date(next.start))}"
+                osdNext.visibility = View.VISIBLE
+            } else osdNext.visibility = View.GONE
         } else {
             osdProgram.text = if (Store.isFavorite(ch.url)) "★ В избранном" else ""
             osdProgress.visibility = View.INVISIBLE
+            osdRemain.visibility = View.GONE
+            osdNext.visibility = View.GONE
         }
     }
 
@@ -719,13 +836,29 @@ class PlayerActivity : Activity() {
                     KeyEvent.KEYCODE_DPAD_LEFT -> { cycleMenuPlaylist(-1); return true }
                     KeyEvent.KEYCODE_DPAD_RIGHT -> { cycleMenuPlaylist(1); return true }
                     KeyEvent.KEYCODE_BACK -> { closePanels(); return true }
+                    // п.3: удержание «Вверх» ~1 сек — прыжок на пункт «Настройки»
+                    KeyEvent.KEYCODE_DPAD_UP -> {
+                        if (event.repeatCount == 0) {
+                            upHeldFired = false
+                            handler.postDelayed(upHoldRunnable, 1000)
+                        }
+                        return super.dispatchKeyEvent(event)
+                    }
+                }
+                if (event.action == KeyEvent.ACTION_UP && event.keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                    handler.removeCallbacks(upHoldRunnable)
                 }
                 super.dispatchKeyEvent(event)
             }
             Panel.BROWSER -> {
-                if (event.action == KeyEvent.ACTION_DOWN &&
-                    (event.keyCode == KeyEvent.KEYCODE_BACK || event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT)) {
-                    cancelBrowse(); return true
+                if (event.action == KeyEvent.ACTION_DOWN) when (event.keyCode) {
+                    // влево из списка каналов — к списку категорий
+                    KeyEvent.KEYCODE_DPAD_LEFT -> {
+                        handler.removeCallbacks(livePreviewRunnable)
+                        browserOverlay.visibility = View.GONE
+                        openLeftMenu(); return true
+                    }
+                    KeyEvent.KEYCODE_BACK -> { cancelBrowse(); return true }
                 }
                 super.dispatchKeyEvent(event)
             }
@@ -742,14 +875,22 @@ class PlayerActivity : Activity() {
     private fun handleFullscreenKey(event: KeyEvent): Boolean {
         val code = event.keyCode
         if (event.action == KeyEvent.ACTION_DOWN) {
+            // пока кнопки плашки на экране — стрелки ходят по ним, а не переключают каналы
+            if (osdButtonsShown && (code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT)) {
+                restartOsdTimer()
+                return super.dispatchKeyEvent(event)
+            }
             when (code) {
                 KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> { zap(1); return true }
                 KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> { zap(-1); return true }
-                KeyEvent.KEYCODE_DPAD_LEFT -> { openLeftMenu(); return true }
-                KeyEvent.KEYCODE_DPAD_RIGHT -> { openEpgPanel(); return true }
+                // п.2: влево открывает тот список, откуда запущен канал
+                KeyEvent.KEYCODE_DPAD_LEFT -> { hideOsd(); openChannelBrowser(); return true }
+                KeyEvent.KEYCODE_DPAD_RIGHT -> { hideOsd(); openEpgPanel(); return true }
                 KeyEvent.KEYCODE_MENU -> { showSettingsDialog(); return true }
                 KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> { player.playWhenReady = !player.playWhenReady; return true }
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                    // если фокус уже на кнопке плашки — обычное нажатие кнопки
+                    if (osdButtonsShown && isOsdButtonFocused()) return super.dispatchKeyEvent(event)
                     if (event.repeatCount == 0) {
                         okPressed = true; longPressFired = false
                         handler.postDelayed(longPressRunnable, 900)
@@ -757,6 +898,12 @@ class PlayerActivity : Activity() {
                     return true
                 }
                 KeyEvent.KEYCODE_BACK -> {
+                    // «Назад» при открытой плашке скрывает её целиком: и кнопки, и информацию
+                    if (osdPanel.visibility == View.VISIBLE) {
+                        handler.removeCallbacks(hideOsdRunnable)
+                        hideOsd()
+                        return true
+                    }
                     val now = System.currentTimeMillis()
                     if (now - lastBackTs < 2500) finish()
                     else { lastBackTs = now; toast("Нажмите НАЗАД ещё раз для выхода") }
@@ -765,17 +912,39 @@ class PlayerActivity : Activity() {
             }
         } else if (event.action == KeyEvent.ACTION_UP &&
             (code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER)) {
+            if (osdButtonsShown && isOsdButtonFocused()) return super.dispatchKeyEvent(event)
             if (okPressed) {
                 okPressed = false
                 handler.removeCallbacks(longPressRunnable)
-                if (!longPressFired) openChannelBrowser()
+                // короткое нажатие OK — показать плашку с кнопками действий
+                if (!longPressFired) currentChannel?.let { showOsd(it, withButtons = true) }
             }
             return true
         }
         return super.dispatchKeyEvent(event)
     }
 
-    private val longPressRunnable = Runnable { longPressFired = true; toggleFavoriteCurrent() }
+    private val OSD_BUTTON_IDS = setOf(R.id.osdBtnFav, R.id.osdBtnPrev, R.id.osdBtnNext, R.id.osdBtnLast)
+
+    /** Фокус сейчас на одной из кнопок плашки? */
+    private fun isOsdButtonFocused(): Boolean {
+        val id = currentFocus?.id ?: return false
+        return id in OSD_BUTTON_IDS
+    }
+
+    private var upHeldFired = false
+
+    /** Прыжок к «Настройкам» из любого места списка категорий. */
+    private val upHoldRunnable = Runnable {
+        upHeldFired = true
+        if (panel == Panel.LEFT) {
+            val idx = catItemsList.indexOfFirst { it.type == "SETTINGS" }
+            if (idx >= 0) { catList.requestFocus(); catList.setSelection(idx) }
+        }
+    }
+
+    /** Удержание OK ~1 сек — переход к прошлому просмотренному каналу. */
+    private val longPressRunnable = Runnable { longPressFired = true; gotoPrevChannel() }
 
     // ------------------------------------------------------------ панели
 
@@ -905,6 +1074,7 @@ class PlayerActivity : Activity() {
                 for ((g, n) in counts) items.add(CatItem(g, n, "GROUP", g))
             }
         }
+        catItemsList = items
         catList.adapter = CategoryAdapter(this, items)
         catList.setOnItemClickListener { _, _, pos, _ ->
             val item = items[pos]
@@ -1434,7 +1604,7 @@ class PlayerActivity : Activity() {
                 AlertDialog.Builder(this)
                     .setTitle("Доступно обновление")
                     .setMessage("Новая версия ${info.versionName}\nТекущая: ${UpdateManager.currentName(this)}\n\n${info.notes}".trim())
-                    .setPositiveButton("Обновить") { _, _ -> startDownload(info.apkUrl) }
+                    .setPositiveButton("Обновить") { _, _ -> startDownload(info.apkUrl, info.versionCode) }
                     .setNegativeButton("Позже", null).show()
             } else if (!silent) toast("У вас последняя версия (${UpdateManager.currentName(this)})")
         }
@@ -1446,22 +1616,30 @@ class PlayerActivity : Activity() {
             AlertDialog.Builder(this)
                 .setTitle("Вернуться на предыдущую версию")
                 .setMessage("Будет установлена версия ${info.prevName}.\nНастройки и данные сохранятся.\n\nНа некоторых ТВ может потребоваться подтвердить установку вручную.")
-                .setPositiveButton("Вернуться") { _, _ -> startDownload(info.prevUrl) }
+                .setPositiveButton("Вернуться") { _, _ -> startDownload(info.prevUrl, info.prevCode) }
                 .setNegativeButton("Отмена", null).show()
         }
     }
 
-    private fun startDownload(url: String) {
-        val dlg = AlertDialog.Builder(this).setTitle("Загрузка обновления").setMessage("0%").setCancelable(false).create()
+    private fun startDownload(url: String, versionCode: Int) {
+        // если файл ИМЕННО этой версии уже скачан — не качаем повторно, сразу ставим
+        if (UpdateManager.hasDownloaded(this, versionCode)) {
+            UpdateManager.installDownloaded(this) { msg -> toast(msg) }
+            return
+        }
+        val dlg = AlertDialog.Builder(this)
+            .setTitle("Загрузка обновления").setMessage("0%").setCancelable(false).create()
         dlg.show()
-        UpdateManager.downloadAndInstall(this, url,
-            onError = { msg -> if (dlg.isShowing) dlg.dismiss(); awaitingInstall = false; toast(msg) },
+        val closeDlg = { if (dlg.isShowing) dlg.dismiss() }
+        UpdateManager.downloadAndInstall(this, url, versionCode,
+            onError = { msg -> awaitingInstall = false; toast(msg) },
             onProgress = { pct -> if (dlg.isShowing) dlg.setMessage("Скачано $pct%") },
             onNeedPermission = {
-                if (dlg.isShowing) dlg.dismiss()
                 awaitingInstall = true
                 toast("Разрешите установку и вернитесь в приложение — установка продолжится сама")
-            }
+                UpdateManager.openInstallPermission(this)
+            },
+            onDone = { closeDlg() }
         )
     }
 
