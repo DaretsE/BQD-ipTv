@@ -1,35 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Подсветка выделенной строки: заливка + яркая teal-обводка (имитация свечения). -->
+<!--
+    Выделение строки как в прототипе: полупрозрачная подложка + многослойное
+    halo-свечение (в CSS это box-shadow из трёх колец, здесь — вложенные обводки).
+-->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:state_pressed="true">
-        <layer-list>
-            <item>
-                <shape android:shape="rectangle">
-                    <solid android:color="#4463D4E2" />
-                    <corners android:radius="14dp" />
-                </shape>
-            </item>
-            <item>
-                <shape android:shape="rectangle">
-                    <solid android:color="@android:color/transparent" />
-                    <stroke android:width="2dp" android:color="@color/focus_stroke" />
-                    <corners android:radius="14dp" />
-                </shape>
-            </item>
-        </layer-list>
-    </item>
     <item android:state_focused="true">
         <layer-list>
             <item>
                 <shape android:shape="rectangle">
-                    <solid android:color="@color/focus_fill" />
-                    <corners android:radius="14dp" />
+                    <solid android:color="@color/halo_3" />
+                    <corners android:radius="18dp" />
                 </shape>
             </item>
-            <item>
+            <item android:left="2dp" android:top="2dp" android:right="2dp" android:bottom="2dp">
                 <shape android:shape="rectangle">
-                    <solid android:color="@android:color/transparent" />
-                    <stroke android:width="2dp" android:color="@color/focus_stroke" />
+                    <solid android:color="@color/halo_2" />
+                    <corners android:radius="16dp" />
+                </shape>
+            </item>
+            <item android:left="4dp" android:top="4dp" android:right="4dp" android:bottom="4dp">
+                <shape android:shape="rectangle">
+                    <solid android:color="@color/row_focus_bg" />
+                    <stroke android:width="1dp" android:color="@color/halo_1" />
                     <corners android:radius="14dp" />
                 </shape>
             </item>
@@ -37,26 +29,14 @@
     </item>
     <item android:state_selected="true">
         <layer-list>
-            <item>
+            <item android:left="4dp" android:top="4dp" android:right="4dp" android:bottom="4dp">
                 <shape android:shape="rectangle">
-                    <solid android:color="@color/focus_fill" />
-                    <corners android:radius="14dp" />
-                </shape>
-            </item>
-            <item>
-                <shape android:shape="rectangle">
-                    <solid android:color="@android:color/transparent" />
-                    <stroke android:width="2dp" android:color="@color/focus_stroke" />
+                    <solid android:color="@color/row_focus_bg" />
+                    <stroke android:width="1dp" android:color="@color/halo_2" />
                     <corners android:radius="14dp" />
                 </shape>
             </item>
         </layer-list>
-    </item>
-    <item android:state_activated="true">
-        <shape android:shape="rectangle">
-            <solid android:color="#1A63D4E2" />
-            <corners android:radius="14dp" />
-        </shape>
     </item>
     <item>
         <color android:color="@android:color/transparent" />

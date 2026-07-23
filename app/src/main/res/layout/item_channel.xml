@@ -1,21 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Строка списка каналов.
-    Справа у ВЫДЕЛЕННОГО канала показывается квадратная кнопка действия
-    (звезда — добавить в избранное, корзина — убрать). Кнопка живёт вне
-    подсветки строки: подсветка рисуется селектором списка, а кнопка имеет
-    собственный фон и подсвечивается отдельно, когда фокус переведён на неё.
+    Строка списка каналов — по прототипу:
+    номер (42dp) • логотип 58x42 r10 • [название + передача В ОДНУ СТРОКУ, отступ 9dp]
+    • звезда текущего канала • квадратная кнопка действия 44dp справа.
+    Кнопка нейтральная (card-bg + hairline) и подсвечивается только в фокусе.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="horizontal"
     android:gravity="center_vertical"
-    android:paddingTop="8dp"
-    android:paddingBottom="8dp"
     android:paddingLeft="12dp"
-    android:paddingRight="8dp"
-    android:minHeight="60dp">
+    android:paddingRight="10dp"
+    android:paddingTop="10dp"
+    android:paddingBottom="10dp"
+    android:minHeight="56dp">
 
     <TextView
         android:id="@+id/rowNum"
@@ -36,17 +35,19 @@
         android:padding="3dp"
         android:scaleType="fitCenter" />
 
+    <!-- название и текущая передача в одну строку, как в прототипе -->
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
-        android:orientation="vertical">
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
 
         <TextView
             android:id="@+id/rowName"
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textColor="@color/text"
+            android:textColor="#FFFFFFFF"
             android:textSize="17sp"
             android:textStyle="bold"
             android:singleLine="true"
@@ -54,9 +55,10 @@
 
         <TextView
             android:id="@+id/rowNow"
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
+            android:layout_weight="1"
+            android:layout_marginLeft="9dp"
             android:textColor="@color/text_dim2"
             android:textSize="13sp"
             android:singleLine="true"
@@ -71,17 +73,16 @@
         android:text="★"
         android:textColor="@color/accent2"
         android:textSize="16sp"
-        android:paddingLeft="8dp"
-        android:paddingRight="4dp" />
+        android:paddingLeft="6dp" />
 
-    <!-- квадратная кнопка действия: видна только у выделенного канала -->
     <TextView
         android:id="@+id/rowAction"
-        android:layout_width="46dp"
-        android:layout_height="46dp"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
         android:layout_marginLeft="8dp"
         android:gravity="center"
-        android:textSize="22sp"
+        android:textColor="@color/rowbtn_icon"
+        android:textSize="20sp"
         android:includeFontPadding="false"
         android:visibility="gone" />
 </LinearLayout>

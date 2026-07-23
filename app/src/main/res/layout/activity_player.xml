@@ -183,16 +183,31 @@
 
         <LinearLayout
             android:id="@+id/browserList"
-            android:layout_width="520dp" android:layout_height="match_parent"
+            android:layout_width="540dp" android:layout_height="match_parent"
             android:layout_marginLeft="88dp"
             android:orientation="vertical" android:background="@drawable/panel_bg_left"
-            android:paddingLeft="20dp" android:paddingRight="14dp"
-            android:paddingTop="14dp" android:paddingBottom="14dp">
+            android:paddingLeft="44dp" android:paddingRight="16dp"
+            android:paddingTop="54dp" android:paddingBottom="18dp">
+
+            <!-- имя плейлиста: мелкое, в верхнем регистре, с разрядкой -->
+            <TextView android:id="@+id/browserPlName"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:textColor="@color/accent2" android:textSize="12sp" android:textStyle="bold"
+                android:letterSpacing="0.12" android:alpha="0.9"
+                android:paddingLeft="4dp" android:paddingRight="4dp" android:paddingBottom="6dp"
+                android:singleLine="true" android:ellipsize="end" />
 
             <TextView android:id="@+id/browserHeader"
                 android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:textColor="@color/accent2" android:textSize="20sp" android:textStyle="bold"
-                android:paddingBottom="10dp" android:singleLine="true" android:ellipsize="end" />
+                android:textColor="#FFFFFFFF" android:textSize="22sp" android:textStyle="bold"
+                android:paddingLeft="4dp" android:paddingRight="4dp"
+                android:paddingTop="6dp" android:paddingBottom="8dp"
+                android:singleLine="true" android:ellipsize="end" />
+
+            <View
+                android:layout_width="40dp" android:layout_height="3dp"
+                android:layout_marginLeft="4dp" android:layout_marginBottom="12dp"
+                android:background="@drawable/hdr_underline" />
 
             <ListView android:id="@+id/browserListView"
                 android:layout_width="match_parent" android:layout_height="match_parent"
@@ -206,10 +221,10 @@
         <LinearLayout
             android:id="@+id/previewCard"
             android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_gravity="bottom" android:layout_marginLeft="608dp"
+            android:layout_gravity="bottom" android:layout_marginLeft="628dp"
             android:orientation="vertical" android:background="@drawable/osd_bg"
-            android:paddingLeft="28dp" android:paddingRight="28dp"
-            android:paddingTop="36dp" android:paddingBottom="22dp">
+            android:paddingLeft="32dp" android:paddingRight="32dp"
+            android:paddingTop="44dp" android:paddingBottom="26dp">
 
             <LinearLayout
                 android:layout_width="match_parent" android:layout_height="wrap_content"
@@ -254,9 +269,11 @@
 
     <LinearLayout
         android:id="@+id/leftMenu"
-        android:layout_width="380dp" android:layout_height="match_parent"
+        android:layout_width="392dp" android:layout_height="match_parent"
         android:layout_gravity="left" android:orientation="vertical"
-        android:background="@drawable/panel_bg_left" android:padding="16dp" android:visibility="gone">
+        android:background="@drawable/panel_bg_left"
+        android:paddingLeft="16dp" android:paddingRight="16dp"
+        android:paddingTop="54dp" android:paddingBottom="20dp" android:visibility="gone">
 
         <TextView android:id="@+id/plSelector"
             android:layout_width="match_parent" android:layout_height="wrap_content"
@@ -281,7 +298,9 @@
         android:id="@+id/rightPanel"
         android:layout_width="500dp" android:layout_height="match_parent"
         android:layout_gravity="right" android:orientation="vertical"
-        android:background="@drawable/panel_bg_right" android:padding="16dp" android:visibility="gone">
+        android:background="@drawable/panel_bg_right"
+        android:paddingLeft="18dp" android:paddingRight="18dp"
+        android:paddingTop="44dp" android:paddingBottom="20dp" android:visibility="gone">
 
         <TextView android:id="@+id/epgHeader"
             android:layout_width="match_parent" android:layout_height="wrap_content"

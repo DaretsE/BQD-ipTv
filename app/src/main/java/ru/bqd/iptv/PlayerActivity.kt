@@ -15,6 +15,7 @@ import android.os.Looper
 import android.text.InputType
 import android.view.KeyEvent
 import android.view.Gravity
+import android.view.animation.PathInterpolator
 import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.EditText
@@ -70,6 +71,7 @@ class PlayerActivity : Activity() {
     private lateinit var browserOverlay: View
     private lateinit var browserList: View
     private lateinit var browserHeader: TextView
+    private lateinit var browserPlName: TextView
     private lateinit var browserListView: ListView
     private lateinit var previewCard: View
     private lateinit var prevLogo: ImageView
@@ -244,6 +246,7 @@ class PlayerActivity : Activity() {
         browserOverlay = findViewById(R.id.browserOverlay)
         browserList = findViewById(R.id.browserList)
         browserHeader = findViewById(R.id.browserHeader)
+        browserPlName = findViewById(R.id.browserPlName)
         browserListView = findViewById(R.id.browserListView)
         previewCard = findViewById(R.id.previewCard)
         prevLogo = findViewById(R.id.prevLogo)
@@ -282,15 +285,23 @@ class PlayerActivity : Activity() {
         clampPanels()
     }
 
-    /** п.4: ограничиваем ширину панелей, чтобы ничего не уходило за край на маленьких экранах. */
+    /**
+     * Размеры панелей — из прототипа: меню 392, список каналов 540, рейка 88,
+     * правая панель 520. На узких экранах ужимаем, чтобы ничего не уезжало за край.
+     * Карточка предпросмотра сдвигается на ширину рейки + ширину списка.
+     */
     private fun clampPanels() {
         val w = resources.displayMetrics.widthPixels
-        fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
-        val listW = minOf(dp(520), (w * 0.62).toInt()).coerceAtLeast(dp(240))
+        fun dpx(v: Int) = (v * resources.displayMetrics.density).toInt()
+        val railW = dpx(88)
+        val listW = minOf(dpx(540), (w * 0.62).toInt()).coerceAtLeast(dpx(240))
         browserList.layoutParams = browserList.layoutParams.apply { width = listW }
-        (previewCard.layoutParams as? FrameLayout.LayoutParams)?.let { it.leftMargin = listW; previewCard.layoutParams = it }
-        leftMenu.layoutParams = leftMenu.layoutParams.apply { width = minOf(dp(380), (w * 0.85).toInt()) }
-        rightPanel.layoutParams = rightPanel.layoutParams.apply { width = minOf(dp(500), (w * 0.9).toInt()) }
+        (previewCard.layoutParams as? FrameLayout.LayoutParams)?.let {
+            it.leftMargin = railW + listW
+            previewCard.layoutParams = it
+        }
+        leftMenu.layoutParams = leftMenu.layoutParams.apply { width = minOf(dpx(392), (w * 0.85).toInt()) }
+        rightPanel.layoutParams = rightPanel.layoutParams.apply { width = minOf(dpx(520), (w * 0.9).toInt()) }
     }
 
     /**
@@ -732,7 +743,10 @@ class PlayerActivity : Activity() {
         ImageLoader.load(if (ch.logo.isNotEmpty()) ch.logo else EpgManager.iconFor(ch), osdLogo)
         updateOsdProgram(ch)
 
-        osdPanel.visibility = View.VISIBLE
+        if (osdPanel.visibility != View.VISIBLE) {
+            osdPanel.visibility = View.VISIBLE
+            animOsdUp(osdPanel)
+        }
         if (withButtons) showOsdButtons() else { osdButtons.visibility = View.GONE; osdButtonsShown = false }
         restartOsdTimer()
     }
@@ -984,6 +998,9 @@ class PlayerActivity : Activity() {
         channelBeforeBrowse = currentChannel
         browserChannels = zapList
         browserHeader.text = currentZapTitle()
+        // имя плейлиста над заголовком — в верхнем регистре, как в прототипе
+        browserPlName.text = (if (curPlaylistIdx == -1) "Избранное"
+            else playlists.getOrNull(curPlaylistIdx)?.name ?: "").uppercase()
         val adapter = ChannelAdapter(this, browserChannels, showNow = true)
         browserListView.adapter = adapter
         browserListView.setOnItemClickListener { _, _, pos, _ ->
@@ -1003,6 +1020,10 @@ class PlayerActivity : Activity() {
         adapter.actionFocused = false
         refreshRail()
         browserOverlay.visibility = View.VISIBLE
+        animFadeIn(browserOverlay)
+        animPanelInLeft(railPanel)
+        animRailIn(browserList)
+        animOsdUp(previewCard)
         browserListView.requestFocus()
         val start = browserChannels.indexOfFirst { it.url == currentChannel?.url }.coerceAtLeast(0)
         adapter.selectedPos = start
@@ -1179,6 +1200,7 @@ class PlayerActivity : Activity() {
         menuPlaylistIdx = curPlaylistIdx
         refreshLeftMenu()
         leftMenu.visibility = View.VISIBLE
+        animPanelInLeft(leftMenu)
         catList.requestFocus()
     }
 
@@ -1302,6 +1324,7 @@ class PlayerActivity : Activity() {
             }
         }
         rightPanel.visibility = View.VISIBLE
+        animPanelInRight(rightPanel)
         epgList.requestFocus()
         val sel = if (targetStart > 0) progs.indexOfFirst { it.start == targetStart }
                   else progs.indexOfFirst { now in it.start until it.stop }
@@ -1811,6 +1834,63 @@ class PlayerActivity : Activity() {
         pausedSince = if (!playerReleased && player.isPlaying) 0L else System.currentTimeMillis()
     }
 
+    // ------------------------------------------------------------ анимации
+
+    /*
+     * Кривые и длительности перенесены один в один из прототипа:
+     *   panelInLeft  .30s cubic-bezier(.2,.70,.30,1)  — панель выезжает слева
+     *   panelInRight .30s cubic-bezier(.2,.70,.30,1)  — панель выезжает справа
+     *   railIn       .36s cubic-bezier(.2,.72,.28,1)  — содержимое из-под рейки
+     *   railOut      .30s cubic-bezier(.4,0,.70,1)    — уход содержимого под рейку
+     *   osdUp        .34s cubic-bezier(.2,.70,.30,1)  — плашка снизу
+     *   fadeIn       .25s
+     */
+    private val easeOut = PathInterpolator(0.2f, 0.7f, 0.3f, 1f)
+    private val easeRailIn = PathInterpolator(0.2f, 0.72f, 0.28f, 1f)
+    private val easeRailOut = PathInterpolator(0.4f, 0f, 0.7f, 1f)
+
+    private fun animPanelInLeft(v: View) {
+        v.animate().cancel()
+        v.translationX = -dp(34).toFloat(); v.alpha = 0f
+        v.animate().translationX(0f).alpha(1f).setDuration(300).setInterpolator(easeOut).start()
+    }
+
+    private fun animPanelInRight(v: View) {
+        v.animate().cancel()
+        v.translationX = dp(34).toFloat(); v.alpha = 0f
+        v.animate().translationX(0f).alpha(1f).setDuration(300).setInterpolator(easeOut).start()
+    }
+
+    /** Содержимое выезжает из-под рейки. */
+    private fun animRailIn(v: View) {
+        v.animate().cancel()
+        v.translationX = -dp(160).toFloat(); v.alpha = 0.15f
+        v.animate().translationX(0f).alpha(1f).setDuration(360).setInterpolator(easeRailIn).start()
+    }
+
+    /** Содержимое уходит под рейку (используется при закрытии списка). */
+    private fun animRailOut(v: View, then: () -> Unit) {
+        v.animate().cancel()
+        v.animate().translationX(-dp(160).toFloat()).alpha(0f)
+            .setDuration(300).setInterpolator(easeRailOut)
+            .withEndAction {
+                v.translationX = 0f; v.alpha = 1f
+                then()
+            }.start()
+    }
+
+    private fun animOsdUp(v: View) {
+        v.animate().cancel()
+        v.translationY = dp(30).toFloat(); v.alpha = 0f
+        v.animate().translationY(0f).alpha(1f).setDuration(340).setInterpolator(easeOut).start()
+    }
+
+    private fun animFadeIn(v: View) {
+        v.animate().cancel()
+        v.alpha = 0f
+        v.animate().alpha(1f).setDuration(250).start()
+    }
+
     // ------------------------------------------------------------ панель настроек
 
     private val setItems = listOf(
@@ -1839,6 +1919,8 @@ class PlayerActivity : Activity() {
         setDetailActive = false
         setList.isFocusable = true
         settingsPanel.visibility = View.VISIBLE
+        animFadeIn(settingsPanel)
+        animPanelInLeft(setList)
 
         val adapter = SettingsAdapter(this, setItems) { setValueFor(it) }
         setList.adapter = adapter
@@ -2258,7 +2340,9 @@ class PlayerActivity : Activity() {
             return
         }
         toastView.text = msg
+        val wasHidden = toastView.visibility != View.VISIBLE
         toastView.visibility = View.VISIBLE
+        if (wasHidden) animOsdUp(toastView)
         handler.removeCallbacks(hideToastRunnable)
         handler.postDelayed(hideToastRunnable, 2200)
     }

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Кнопка «в избранное»: нейтральная, салатовое halo только в фокусе. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_activated="true">
+        <layer-list>
+            <item>
+                <shape android:shape="rectangle">
+                    <solid android:color="@color/lime_halo_2" />
+                    <corners android:radius="14dp" />
+                </shape>
+            </item>
+            <item android:left="2dp" android:top="2dp" android:right="2dp" android:bottom="2dp">
+                <shape android:shape="rectangle">
+                    <solid android:color="@color/rowbtn_bg" />
+                    <stroke android:width="1dp" android:color="@color/lime_halo_1" />
+                    <corners android:radius="11dp" />
+                </shape>
+            </item>
+        </layer-list>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/rowbtn_bg" />
+            <stroke android:width="1dp" android:color="@color/hairline" />
+            <corners android:radius="11dp" />
+        </shape>
+    </item>
+</selector>

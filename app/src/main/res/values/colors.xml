@@ -49,4 +49,18 @@
     <color name="hairline">#12FFFFFF</color>
     <color name="overlay_dark">#F0071A22</color>
     <color name="overlay_soft">#80031017</color>
+
+    <!-- точные значения из прототипа -->
+    <color name="row_focus_bg">#0FFFFFFF</color>
+    <color name="halo_1">#8063D4E2</color>
+    <color name="halo_2">#4663D4E2</color>
+    <color name="halo_3">#2445B8C7</color>
+    <color name="lime_halo_1">#99A3E05F</color>
+    <color name="lime_halo_2">#59A3E05F</color>
+    <color name="red_halo_1">#80FF7878</color>
+    <color name="red_halo_2">#59FF5A5A</color>
+    <color name="pill_bg">#0FFFFFFF</color>
+    <color name="rowbtn_bg">#0F2A33</color>
+    <color name="rowbtn_icon">#C0D3DA</color>
+    <color name="delactive_bg">#08FFFFFF</color>
 </resources>

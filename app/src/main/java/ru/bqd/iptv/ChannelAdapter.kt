@@ -68,15 +68,16 @@ class ChannelAdapter(
         star.visibility = if (fav && position != selectedPos) View.VISIBLE else View.GONE
 
         if (position == selectedPos) {
+            // кнопка нейтральная; цвет и свечение появляются только когда на ней фокус
             action.visibility = View.VISIBLE
             if (fav) {
-                action.setBackgroundResource(R.drawable.action_del)
+                action.setBackgroundResource(R.drawable.rowbtn_del)
                 IconFont.apply(action, "delete")
-                action.setTextColor(0xFFFF8A8A.toInt())
+                action.setTextColor(if (actionFocused) 0xFFFF8A8A.toInt() else 0xFFC0D3DA.toInt())
             } else {
-                action.setBackgroundResource(R.drawable.action_fav)
+                action.setBackgroundResource(R.drawable.rowbtn_add)
                 IconFont.apply(action, "star")
-                action.setTextColor(0xFFA8E05F.toInt())
+                action.setTextColor(if (actionFocused) 0xFFA8E05F.toInt() else 0xFFC0D3DA.toInt())
             }
             action.isActivated = actionFocused
         } else {
