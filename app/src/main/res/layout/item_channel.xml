@@ -1,15 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Строка списка каналов: номер, логотип, название + текущая передача, звезда. -->
+<!--
+    Строка списка каналов.
+    Справа у ВЫДЕЛЕННОГО канала показывается квадратная кнопка действия
+    (звезда — добавить в избранное, корзина — убрать). Кнопка живёт вне
+    подсветки строки: подсветка рисуется селектором списка, а кнопка имеет
+    собственный фон и подсвечивается отдельно, когда фокус переведён на неё.
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="horizontal"
     android:gravity="center_vertical"
-    android:paddingTop="10dp"
-    android:paddingBottom="10dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="8dp"
     android:paddingLeft="12dp"
-    android:paddingRight="12dp"
-    android:minHeight="58dp">
+    android:paddingRight="8dp"
+    android:minHeight="60dp">
 
     <TextView
         android:id="@+id/rowNum"
@@ -46,7 +52,6 @@
             android:singleLine="true"
             android:ellipsize="end" />
 
-        <!-- отступ между названием канала и текущей передачей (п.4 спецификации) -->
         <TextView
             android:id="@+id/rowNow"
             android:layout_width="match_parent"
@@ -66,5 +71,17 @@
         android:text="★"
         android:textColor="@color/accent2"
         android:textSize="16sp"
-        android:paddingLeft="8dp" />
+        android:paddingLeft="8dp"
+        android:paddingRight="4dp" />
+
+    <!-- квадратная кнопка действия: видна только у выделенного канала -->
+    <TextView
+        android:id="@+id/rowAction"
+        android:layout_width="46dp"
+        android:layout_height="46dp"
+        android:layout_marginLeft="8dp"
+        android:gravity="center"
+        android:textSize="22sp"
+        android:includeFontPadding="false"
+        android:visibility="gone" />
 </LinearLayout>
