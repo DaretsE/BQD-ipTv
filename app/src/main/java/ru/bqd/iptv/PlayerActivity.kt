@@ -1141,7 +1141,10 @@ class PlayerActivity : Activity() {
      * попадаем в развёрнутое меню.
      */
     private fun refreshRail(activeOverrideType: String? = null) {
-        val items = buildCatItems(curPlaylistIdx)
+        // -1 = «Избранное»: это не плейлист, поэтому категории берём
+        // из последнего реального плейлиста, иначе рейка осталась бы пустой
+        val plIdx = if (curPlaylistIdx >= 0) curPlaylistIdx else lastRealPlaylistIdx
+        val items = buildCatItems(plIdx)
         val adapter = CategoryAdapter(this, items, compact = true)
         // подсвечиваем текущую категорию: либо служебный пункт (настройки/поиск),
         // либо активная группа каналов
@@ -2160,17 +2163,6 @@ class PlayerActivity : Activity() {
         setList.isFocusable = true
         setList.requestFocus()
         setList.setSelection(setSelected)
-    }
-
-    private fun renderSetDetail(pos: Int, active: Boolean) {
-        setDetail.removeAllViews()
-        val item = setItems.getOrNull(pos) ?: return
-        when (item.kind) {
-            "qr" -> buildQrDetail(active)
-            "sources" -> buildSourcesDetail(active)
-            "quality" -> buildQualityDetail(active)
-            "about" -> buildAboutDetail(active)
-        }
     }
 
     // ================= правая колонка настроек =================
