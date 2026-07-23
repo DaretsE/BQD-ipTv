@@ -82,7 +82,6 @@ class PlayerActivity : Activity() {
     private lateinit var prevNext: TextView
 
     private lateinit var leftMenu: View
-    private lateinit var plSelector: TextView
     private lateinit var catList: ListView
 
     private lateinit var rightPanel: View
@@ -107,6 +106,7 @@ class PlayerActivity : Activity() {
     private lateinit var ssClock: TextView
 
     private lateinit var searchOverlay: View
+    private lateinit var searchContent: View
     private lateinit var searchInput: EditText
     private lateinit var searchStatus: TextView
     private lateinit var searchResults: ListView
@@ -133,6 +133,8 @@ class PlayerActivity : Activity() {
     private var curPlaylistIdx = 0
     private var curCategory: String? = null
     private var menuPlaylistIdx = 0
+    /** Последний реальный плейлист (нужен, когда смотрим «Избранное», curPlaylistIdx = -1). */
+    private var lastRealPlaylistIdx = 0
 
     /** Текущие пункты левого меню — нужны для прыжка на «Настройки». */
     private var catItemsList: List<CatItem> = emptyList()
@@ -145,7 +147,7 @@ class PlayerActivity : Activity() {
     private lateinit var setListVersion: TextView
     private lateinit var setList: ListView
     private lateinit var setDetail: LinearLayout
-    private lateinit var setDetailScroll: View
+    private lateinit var setDetailScroll: android.widget.ScrollView
     private var setDetailActive = false
     private var setSelected = 0
 
@@ -167,8 +169,16 @@ class PlayerActivity : Activity() {
     private var browserActionFocused = false
 
     // свёрнутая рейка рядом со списком каналов (только иконки категорий)
-    private lateinit var railPanel: View
-    private lateinit var railListView: ListView
+    // Ширины меню из прототипа: #leftMenu 392px / .collapsed 88px,
+    // отступы 16px / 10px.
+    private val MENU_W_FULL = 392
+    private val MENU_W_RAIL = 88
+    private val MENU_PAD_FULL = 16
+    private val MENU_PAD_RAIL = 10
+
+    /** Свёрнуто ли левое меню в рейку (класс .collapsed в прототипе). */
+    private var menuCollapsed = false
+    private var menuWidthAnim: android.animation.ValueAnimator? = null
     private var channelBeforeBrowse: Channel? = null
     private var modeSelection = "tv"
 
@@ -232,12 +242,7 @@ class PlayerActivity : Activity() {
         osdBtnNext = findViewById(R.id.osdBtnNext)
         osdBtnLast = findViewById(R.id.osdBtnLast)
         setupOsdButtons()
-        railPanel = findViewById(R.id.railPanel)
-        railListView = findViewById(R.id.railListView)
         // рейка — визуальный указатель категории, фокус на неё не переводится
-        railListView.isFocusable = false
-        railListView.isFocusableInTouchMode = false
-        railListView.isEnabled = false
         settingsPanel = findViewById(R.id.settingsPanel)
         setListPanel = findViewById(R.id.setListPanel)
         setListVersion = findViewById(R.id.setListVersion)
@@ -260,7 +265,6 @@ class PlayerActivity : Activity() {
         prevRemain = findViewById(R.id.prevRemain)
         prevNext = findViewById(R.id.prevNext)
         leftMenu = findViewById(R.id.leftMenu)
-        plSelector = findViewById(R.id.plSelector)
         catList = findViewById(R.id.catList)
         rightPanel = findViewById(R.id.rightPanel)
         epgHeader = findViewById(R.id.epgHeader)
@@ -282,6 +286,7 @@ class PlayerActivity : Activity() {
         screensaver = findViewById(R.id.screensaver)
         ssClock = findViewById(R.id.ssClock)
         searchOverlay = findViewById(R.id.searchOverlay)
+        searchContent = findViewById(R.id.searchContent)
         searchInput = findViewById(R.id.searchInput)
         searchStatus = findViewById(R.id.searchStatus)
         searchResults = findViewById(R.id.searchResults)
@@ -304,7 +309,11 @@ class PlayerActivity : Activity() {
             it.leftMargin = railW + listW
             previewCard.layoutParams = it
         }
-        leftMenu.layoutParams = leftMenu.layoutParams.apply { width = minOf(dpx(392), (w * 0.85).toInt()) }
+        if (!menuCollapsed) {
+            leftMenu.layoutParams = leftMenu.layoutParams.apply {
+                width = minOf(dpx(MENU_W_FULL), (w * 0.85).toInt())
+            }
+        }
         rightPanel.layoutParams = rightPanel.layoutParams.apply { width = minOf(dpx(520), (w * 0.9).toInt()) }
 
         val setListW = minOf(dpx(400), (w * 0.55).toInt()).coerceAtLeast(dpx(260))
@@ -890,17 +899,32 @@ class PlayerActivity : Activity() {
         return when (panel) {
             Panel.NONE -> handleFullscreenKey(event)
             Panel.LEFT -> {
-                if (event.action == KeyEvent.ACTION_DOWN) when (event.keyCode) {
-                    KeyEvent.KEYCODE_DPAD_LEFT -> { cycleMenuPlaylist(-1); return true }
-                    KeyEvent.KEYCODE_DPAD_RIGHT -> { cycleMenuPlaylist(1); return true }
-                    KeyEvent.KEYCODE_BACK -> { closePanels(); return true }
-                    // п.3: удержание «Вверх» ~1 сек — прыжок на пункт «Настройки»
-                    KeyEvent.KEYCODE_DPAD_UP -> {
-                        if (event.repeatCount == 0) {
-                            upHeldFired = false
-                            handler.postDelayed(upHoldRunnable, 1000)
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    val pos = catList.selectedItemPosition
+                    val type = catItemsList.getOrNull(pos)?.type
+                    when (event.keyCode) {
+                        // ←/→ листают плейлист ТОЛЬКО когда выделена строка-селектор (как в прототипе),
+                        // на остальных пунктах ← закрывает меню, → открывает пункт
+                        KeyEvent.KEYCODE_DPAD_LEFT -> {
+                            if (type == "PLSEL") cycleMenuPlaylist(-1) else closePanels()
+                            return true
                         }
-                        return super.dispatchKeyEvent(event)
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                            if (type == "PLSEL") cycleMenuPlaylist(1) else activateCat(pos)
+                            return true
+                        }
+                        KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                            activateCat(pos); return true
+                        }
+                        KeyEvent.KEYCODE_BACK -> { closePanels(); return true }
+                        // п.3: удержание «Вверх» ~1 сек — прыжок на пункт «Настройки»
+                        KeyEvent.KEYCODE_DPAD_UP -> {
+                            if (event.repeatCount == 0) {
+                                upHeldFired = false
+                                handler.postDelayed(upHoldRunnable, 1000)
+                            }
+                            return super.dispatchKeyEvent(event)
+                        }
                     }
                 }
                 if (event.action == KeyEvent.ACTION_UP && event.keyCode == KeyEvent.KEYCODE_DPAD_UP) {
@@ -1001,21 +1025,73 @@ class PlayerActivity : Activity() {
         leftMenu.visibility = View.GONE
         rightPanel.visibility = View.GONE
         if (::settingsPanel.isInitialized) settingsPanel.visibility = View.GONE
-        if (::railPanel.isInitialized) railPanel.visibility = View.GONE
+        if (::leftMenu.isInitialized) leftMenu.visibility = View.GONE
         setDetailActive = false
         panel = Panel.NONE
         if (isPhone && currentChannel != null) phoneBar.visibility = View.VISIBLE
     }
 
     /**
-     * Показать общую рейку категорий поверх текущей панели (браузер каналов,
-     * поиск или настройки) с подсветкой активного пункта. В прототипе это
-     * один и тот же #leftMenu.collapsed для всех трёх экранов.
+     * Свернуть левое меню в рейку — класс .collapsed из прототипа.
+     * Рейка и меню это ОДИН элемент: при сворачивании ширина плавно едет
+     * 392dp -> 88dp, отступы 16dp -> 10dp, строки переключаются в режим
+     * «только иконка». Тот же свёрнутый вид используется поверх браузера
+     * каналов, поиска и настроек.
      */
     private fun showRail(activeOverrideType: String? = null) {
-        railPanel.visibility = View.VISIBLE
+        val wasVisible = leftMenu.visibility == View.VISIBLE
+        leftMenu.visibility = View.VISIBLE
+        menuCollapsed = true
         refreshRail(activeOverrideType)
-        animPanelInLeft(railPanel)
+        // фокус рейка не забирает — это индикатор, а не зона навигации
+        catList.isFocusable = false
+        catList.isFocusableInTouchMode = false
+        catList.isEnabled = false
+        if (wasVisible) {
+            // меню уже на экране (открыли раздел из него) — плавно схлопываем
+            animateMenuWidth(dp(MENU_W_RAIL), dp(MENU_PAD_RAIL))
+        } else {
+            setMenuWidth(dp(MENU_W_RAIL), dp(MENU_PAD_RAIL))
+            animPanelInLeft(leftMenu)
+        }
+    }
+
+    /** Развернуть меню обратно в полный вид. */
+    private fun expandMenu(animate: Boolean) {
+        menuCollapsed = false
+        catList.isFocusable = true
+        catList.isFocusableInTouchMode = true
+        catList.isEnabled = true
+        if (animate) animateMenuWidth(dp(MENU_W_FULL), dp(MENU_PAD_FULL))
+        else setMenuWidth(dp(MENU_W_FULL), dp(MENU_PAD_FULL))
+    }
+
+    private fun setMenuWidth(w: Int, pad: Int) {
+        menuWidthAnim?.cancel()
+        leftMenu.layoutParams = leftMenu.layoutParams.apply { width = w }
+        leftMenu.setPadding(pad, leftMenu.paddingTop, pad, leftMenu.paddingBottom)
+        leftMenu.requestLayout()
+    }
+
+    /** Плавное изменение ширины и отступов — transition:width .36s из прототипа. */
+    private fun animateMenuWidth(toW: Int, toPad: Int) {
+        menuWidthAnim?.cancel()
+        val fromW = leftMenu.width.takeIf { it > 0 } ?: leftMenu.layoutParams.width
+        val fromPad = leftMenu.paddingLeft
+        if (fromW == toW && fromPad == toPad) return
+        val a = android.animation.ValueAnimator.ofFloat(0f, 1f)
+        a.duration = 360
+        a.interpolator = easeOut
+        a.addUpdateListener { anim ->
+            val t = anim.animatedValue as Float
+            val w = (fromW + (toW - fromW) * t).toInt()
+            val pad = (fromPad + (toPad - fromPad) * t).toInt()
+            leftMenu.layoutParams = leftMenu.layoutParams.apply { width = w }
+            leftMenu.setPadding(pad, leftMenu.paddingTop, pad, leftMenu.paddingBottom)
+            leftMenu.requestLayout()
+        }
+        menuWidthAnim = a
+        a.start()
     }
 
     private fun openChannelBrowser() {
@@ -1069,15 +1145,16 @@ class PlayerActivity : Activity() {
         val adapter = CategoryAdapter(this, items, compact = true)
         // подсвечиваем текущую категорию: либо служебный пункт (настройки/поиск),
         // либо активная группа каналов
-        val active = when (activeOverrideType) {
-            "SETTINGS" -> items.indexOfFirst { it.type == "SETTINGS" }
-            "SEARCH" -> items.indexOfFirst { it.type == "SEARCH" }
-            else -> if (curCategory == null) items.indexOfFirst { it.type == "ALL" }
-                    else items.indexOfFirst { it.type == "GROUP" && it.group == curCategory }
+        val active = when {
+            activeOverrideType != null -> items.indexOfFirst { it.type == activeOverrideType }
+            curPlaylistIdx == -1 -> items.indexOfFirst { it.type == "FAV" }
+            curCategory == null -> items.indexOfFirst { it.type == "ALL" }
+            else -> items.indexOfFirst { it.type == "GROUP" && it.group == curCategory }
         }
         adapter.activePos = active
-        railListView.adapter = adapter
-        if (active >= 0) railListView.setSelection(active)
+        catItemsList = items
+        catList.adapter = adapter
+        if (active >= 0) catList.setSelection(active)
     }
 
     /**
@@ -1185,7 +1262,8 @@ class PlayerActivity : Activity() {
             channelBeforeBrowse != null && currentChannel?.url != channelBeforeBrowse?.url) {
             channelBeforeBrowse?.let { play(it) }
         }
-        closePanels()
+        // как в прототипе: список и карточка превью уезжают под рейку, потом панель гаснет
+        closeWithRailOut(browserList, previewCard) { closePanels() }
     }
 
     private fun updatePreview(ch: Channel?) {
@@ -1225,10 +1303,10 @@ class PlayerActivity : Activity() {
         }
     }
 
-    private fun currentZapTitle(): String = if (curPlaylistIdx == -1) "★ Избранное"
-    else {
-        val pl = playlists.getOrNull(curPlaylistIdx)?.name ?: ""
-        if (curCategory == null) pl else "$pl • $curCategory"
+    private fun currentZapTitle(): String = when {
+        curPlaylistIdx == -1 -> "Избранное"
+        curCategory == null -> "Все каналы"
+        else -> curCategory ?: "Все каналы"
     }
 
     // --- Левое меню ---
@@ -1236,64 +1314,98 @@ class PlayerActivity : Activity() {
     private fun openLeftMenu() {
         panel = Panel.LEFT
         phoneBar.visibility = View.GONE
-        menuPlaylistIdx = curPlaylistIdx
+        val wasCollapsed = menuCollapsed && leftMenu.visibility == View.VISIBLE
+        // -1 = сейчас смотрим «Избранное»; это не плейлист, поэтому в меню
+        // показываем последний реальный плейлист
+        menuPlaylistIdx = if (curPlaylistIdx >= 0) curPlaylistIdx else lastRealPlaylistIdx
+        if (menuPlaylistIdx > playlists.size - 1) menuPlaylistIdx = 0
+        if (menuPlaylistIdx < 0) menuPlaylistIdx = 0
         refreshLeftMenu()
         leftMenu.visibility = View.VISIBLE
-        animPanelInLeft(leftMenu)
+        // если меню уже висело рейкой — плавно разворачиваем, иначе въезжаем слева
+        expandMenu(animate = wasCollapsed)
+        if (!wasCollapsed) animPanelInLeft(leftMenu)
         catList.requestFocus()
+        // выделение — на текущем разделе, а не всегда на первой строке
+        val sel = when {
+            curPlaylistIdx == -1 -> catItemsList.indexOfFirst { it.type == "FAV" }
+            curCategory == null -> catItemsList.indexOfFirst { it.type == "ALL" }
+            else -> catItemsList.indexOfFirst { it.type == "GROUP" && it.group == curCategory }
+        }
+        if (sel >= 0) catList.setSelection(sel)
     }
 
     private fun cycleMenuPlaylist(dir: Int) {
         val max = playlists.size - 1
-        if (max < -1) return
+        if (max < 0) return
         menuPlaylistIdx += dir
-        if (menuPlaylistIdx < -1) menuPlaylistIdx = max
-        if (menuPlaylistIdx > max) menuPlaylistIdx = -1
+        if (menuPlaylistIdx < 0) menuPlaylistIdx = max
+        if (menuPlaylistIdx > max) menuPlaylistIdx = 0
         refreshLeftMenu()
     }
 
-    /** Пункты меню категорий для указанного плейлиста (-1 — избранное). */
+    /**
+     * Пункты левого меню — порядок ровно как в прототипе (catItems()):
+     *   верхний блок: Настройки, Поиск передачи, Избранное (со счётчиком);
+     *   затем строка-«таблетка» выбора плейлиста (PLSEL);
+     *   затем Все каналы + группы выбранного плейлиста.
+     */
     private fun buildCatItems(plIdx: Int): List<CatItem> {
         val items = ArrayList<CatItem>()
-        items.add(CatItem("Настройки", 0, "SETTINGS"))   // иконка подставляется адаптером
+        items.add(CatItem("Настройки", 0, "SETTINGS"))
         items.add(CatItem("Поиск передачи", 0, "SEARCH"))
-        if (plIdx == -1) {
-            items.add(CatItem("Все избранные", favoriteChannels().size, "ALL"))
-        } else {
-            val pl = playlists.getOrNull(plIdx)
-            if (pl != null) {
-                items.add(CatItem("Все каналы", pl.channels.size, "ALL"))
-                val counts = LinkedHashMap<String, Int>()
-                for (c in pl.channels) counts[c.group] = (counts[c.group] ?: 0) + 1
-                for ((g, n) in counts) items.add(CatItem(g, n, "GROUP", g))
-            }
+        items.add(CatItem("Избранное", favoriteChannels().size, "FAV"))
+        val plName = playlists.getOrNull(plIdx)?.name ?: "—"
+        items.add(CatItem(plName, 0, "PLSEL"))
+        val pl = playlists.getOrNull(plIdx)
+        if (pl != null) {
+            items.add(CatItem("Все каналы", pl.channels.size, "ALL"))
+            val counts = LinkedHashMap<String, Int>()
+            for (c in pl.channels) counts[c.group] = (counts[c.group] ?: 0) + 1
+            for ((g, n) in counts) items.add(CatItem(g, n, "GROUP", g))
         }
         return items
     }
 
     private fun refreshLeftMenu() {
-        val title = if (menuPlaylistIdx == -1) "Избранное" else playlists.getOrNull(menuPlaylistIdx)?.name ?: "—"
-        plSelector.text = "◀   $title   ▶"
-
         val items = buildCatItems(menuPlaylistIdx)
         catItemsList = items
         catList.adapter = CategoryAdapter(this, items)
-        catList.setOnItemClickListener { _, _, pos, _ ->
-            val item = items[pos]
-            when (item.type) {
-                "SETTINGS" -> openSettingsPanel()
-                "SEARCH" -> openSearch()
-                "ALL" -> { selectCategory(null) }
-                "GROUP" -> { selectCategory(item.group) }
-            }
+        catList.setOnItemClickListener { _, _, pos, _ -> activateCat(pos) }
+    }
+
+    /** Открыть пункт левого меню (клик мышью или OK/вправо с пульта). */
+    private fun activateCat(pos: Int) {
+        val item = catItemsList.getOrNull(pos) ?: return
+        when (item.type) {
+            "SETTINGS" -> openSettingsPanel()
+            "SEARCH" -> openSearch()
+            "FAV" -> selectFavorites()
+            "PLSEL" -> cycleMenuPlaylist(1)
+            "ALL" -> selectCategory(null)
+            "GROUP" -> selectCategory(item.group)
         }
+    }
+
+    /** Избранное — отдельный пункт верхнего блока, как в прототипе. */
+    private fun selectFavorites() {
+        curPlaylistIdx = -1
+        curCategory = null
+        rebuildZapList(keepCurrent = false)
+        if (zapList.isNotEmpty()) {
+            val keep = zapList.indexOfFirst { it.url == currentChannel?.url }
+            zapIndex = if (keep >= 0) keep else 0
+            openChannelBrowser()
+        } else { panel = Panel.NONE; toast("В избранном пока пусто") }
     }
 
     private fun selectCategory(group: String?) {
         curPlaylistIdx = menuPlaylistIdx
+        lastRealPlaylistIdx = menuPlaylistIdx
         curCategory = group
         rebuildZapList(keepCurrent = false)
-        leftMenu.visibility = View.GONE
+        // меню НЕ прячем: openChannelBrowser() свернёт его в рейку с анимацией,
+        // как переход .collapsed в прототипе
         if (zapList.isNotEmpty()) {
             val keep = zapList.indexOfFirst { it.url == currentChannel?.url }
             zapIndex = if (keep >= 0) keep else 0
@@ -1398,7 +1510,11 @@ class PlayerActivity : Activity() {
     }
 
     private fun openSearch() {
-        closePanels()
+        // не через closePanels(): меню должно остаться и свернуться в рейку
+        browserOverlay.visibility = View.GONE
+        rightPanel.visibility = View.GONE
+        if (::settingsPanel.isInitialized) settingsPanel.visibility = View.GONE
+        panel = Panel.NONE
         phoneBar.visibility = View.GONE
         focusResultsAfterSearch = false
         searchInput.setText("")
@@ -1407,6 +1523,7 @@ class PlayerActivity : Activity() {
         searchStatus.text = "Введите название. Поиск идёт по идущим сейчас, будущим и доступным в архиве передачам."
         searchOverlay.visibility = View.VISIBLE
         animFadeIn(searchOverlay)
+        animRailIn(searchContent)
         showRail("SEARCH")
         searchInput.requestFocus()
         val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
@@ -1417,9 +1534,12 @@ class PlayerActivity : Activity() {
         handler.removeCallbacks(searchRunnable)
         val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
         imm?.hideSoftInputFromWindow(searchInput.windowToken, 0)
-        searchOverlay.visibility = View.GONE
-        if (::railPanel.isInitialized) railPanel.visibility = View.GONE
-        if (isPhone && currentChannel != null) phoneBar.visibility = View.VISIBLE
+        // rail-closing из прототипа: содержимое уходит под рейку, затем всё гаснет
+        closeWithRailOut(searchContent) {
+            searchOverlay.visibility = View.GONE
+            if (::leftMenu.isInitialized) leftMenu.visibility = View.GONE
+            if (isPhone && currentChannel != null) phoneBar.visibility = View.VISIBLE
+        }
     }
 
     private fun allChannels(): List<Channel> {
@@ -1921,16 +2041,37 @@ class PlayerActivity : Activity() {
             }.start()
     }
 
-    private fun animOsdUp(v: View) {
+    private fun animOsdUp(v: View) = animUp(v, 340)
+
+    /** toastUp в прототипе чуть быстрее плашки (.28s против .34s). */
+    private fun animToastUp(v: View) = animUp(v, 280)
+
+    private fun animUp(v: View, ms: Long) {
         v.animate().cancel()
         v.translationY = dp(30).toFloat(); v.alpha = 0f
-        v.animate().translationY(0f).alpha(1f).setDuration(340).setInterpolator(easeOut).start()
+        v.animate().translationY(0f).alpha(1f).setDuration(ms).setInterpolator(easeOut).start()
     }
 
     private fun animFadeIn(v: View) {
         v.animate().cancel()
         v.alpha = 0f
         v.animate().alpha(1f).setDuration(250).start()
+    }
+
+    /**
+     * Закрытие панели «под рейку» — состояние rail-closing из прототипа:
+     * содержимое уезжает влево и гаснет, и только потом панель прячется.
+     */
+    private fun closeWithRailOut(vararg views: View, then: () -> Unit) {
+        val list = views.filter { it.visibility == View.VISIBLE }
+        if (list.isEmpty()) { then(); return }
+        var done = 0
+        for (v in list) {
+            animRailOut(v) {
+                done++
+                if (done == list.size) then()
+            }
+        }
     }
 
     // ------------------------------------------------------------ панель настроек
@@ -1942,19 +2083,18 @@ class PlayerActivity : Activity() {
         SetItem("info", "О программе", "about")
     )
 
-    /** Короткая сводка раздела для правой колонки списка. */
-    private fun setValueFor(item: SetItem): String = when (item.kind) {
-        "sources" -> "плейлистов: ${Store.getPlaylistCfgs().size} • EPG: ${Store.getEpgSources().size}"
-        "quality" -> "${Quality.qualityLabel()} • буфер ${Store.bufferSec} сек"
-        "about" -> "версия ${UpdateManager.currentName(this)}"
-        else -> ""
-    }
+    /**
+     * В прототипе строки списка разделов настроек показывают только название
+     * и шеврон — без подписи-значения под ним (см. #setList .setrow).
+     * Сводка вынесена в саму карточку раздела справа.
+     */
+    private fun setValueFor(item: SetItem): String = ""
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
     private fun openSettingsPanel() {
         panel = Panel.SETTINGS
-        leftMenu.visibility = View.GONE
+        // меню не прячем — showRail("SETTINGS") свернёт его в рейку с анимацией
         browserOverlay.visibility = View.GONE
         rightPanel.visibility = View.GONE
         phoneBar.visibility = View.GONE
@@ -1965,6 +2105,7 @@ class PlayerActivity : Activity() {
         animFadeIn(settingsPanel)
         showRail("SETTINGS")
         animRailIn(setListPanel)
+        animPanelInRight(setDetailScroll)
 
         val adapter = SettingsAdapter(this, setItems) { setValueFor(it) }
         setList.adapter = adapter
@@ -1982,10 +2123,12 @@ class PlayerActivity : Activity() {
     }
 
     private fun closeSettingsPanel() {
-        settingsPanel.visibility = View.GONE
         setDetailActive = false
         if (::setList.isInitialized) setList.isFocusable = true
-        closePanels()
+        closeWithRailOut(setListPanel) {
+            settingsPanel.visibility = View.GONE
+            closePanels()
+        }
     }
 
     private fun refreshSetList() {
@@ -1994,17 +2137,21 @@ class PlayerActivity : Activity() {
 
     private fun enterSetDetail(pos: Int) {
         setSelected = pos
+        setRow = 0; setCol = 0
         setDetailActive = true
         renderSetDetail(pos, active = true)
-        // пока работаем в деталях, список не забирает фокус — навигация предсказуема
-        setList.isFocusable = false
-        if (!setDetail.requestFocus()) {
+        if (sdCellViews.isEmpty()) {
             // в разделе нет управляемых элементов — остаёмся в списке
-            setList.isFocusable = true
             setDetailActive = false
+            renderSetDetail(pos, active = false)
+            setList.isFocusable = true
             setList.requestFocus()
             setList.setSelection(pos)
+            return
         }
+        // пока работаем в деталях, список не забирает фокус — навигация предсказуема
+        setList.isFocusable = false
+        applySdFocus()
     }
 
     private fun leaveSetDetail() {
@@ -2026,101 +2173,350 @@ class PlayerActivity : Activity() {
         }
     }
 
-    // ---------- строительные блоки деталей ----------
+    // ================= правая колонка настроек =================
+    //
+    // Модель повторяет прототип: панель раздела — это список строк (panelRows),
+    // часть строк оформительские (заголовок секции, разделитель, карточка),
+    // часть — фокусируемые, состоящие из ячеек (cellHtml в прототипе).
+    // Навигация двумерная: ↑↓ по строкам, ←→ по ячейкам внутри строки.
+    // Фокус ведём сами (isActivated), а не системным focusSearch — так поведение
+    // в точности совпадает с прототипом и предсказуемо на пульте.
 
-    private fun addTitle(text: String) {
-        val tv = TextView(this)
-        tv.text = text
-        tv.setTextColor(0xFFFFFFFF.toInt())
-        tv.textSize = 24f
-        tv.setTypeface(tv.typeface, android.graphics.Typeface.BOLD)
-        tv.setPadding(0, 0, 0, dp(10))
-        setDetail.addView(tv)
+    /** Ячейка строки: field / btn / name / ic / chip / toggle. */
+    private class SdCell(
+        val type: String,
+        val label: String = "",
+        val icon: String = "",
+        val primary: Boolean = false,
+        val wide: Boolean = false,
+        val lime: Boolean = false,
+        val red: Boolean = false,
+        val del: Boolean = false,
+        val refr: Boolean = false,
+        val sel: Boolean = false,
+        val on: Boolean = false,
+        /** Плейсхолдер для ячейки типа field. */
+        val label2: String = "",
+        val action: () -> Unit = {}
+    )
+
+    /** Строка панели раздела. */
+    private class SdRow(
+        val secIcon: String? = null,
+        val secTitle: String = "",
+        val secDesc: String = "",
+        val divider: Boolean = false,
+        val about: Boolean = false,
+        val qr: Boolean = false,
+        val label: String = "",
+        val cells: List<SdCell>? = null
+    )
+
+    // текущая позиция в сетке деталей
+    private var setRow = 0
+    private var setCol = 0
+    /** Вьюхи ячеек по фокусируемым строкам — для подсветки без перерисовки. */
+    private val sdCellViews = ArrayList<List<View>>()
+    private val sdCellModels = ArrayList<List<SdCell>>()
+
+    private fun sectionDesc(kind: String): String = when (kind) {
+        "qr" -> "Отсканируйте QR-код телефоном или откройте адрес в браузере. Телефон и ТВ должны быть в одной Wi-Fi сети. На странице настройки добавьте плейлист M3U — эфир запустится сам."
+        "sources" -> "Добавляйте, редактируйте и удаляйте плейлисты (M3U / M3U8) и источники телепрограммы (EPG, XMLTV). Здесь же можно обновить все подключённые списки и источники — телепрограмма подтянется к каналам автоматически по их именам."
+        "quality" -> "Параметры воспроизведения. При слабом интернете сильнее всего помогают «задержка от эфира» и упорное переподключение при обрыве."
+        "about" -> "Версия приложения, проверка обновлений и откат на предыдущую версию."
+        else -> ""
     }
 
-    private fun addDesc(text: String) {
-        val tv = TextView(this)
-        tv.text = text
-        tv.setTextColor(0xFFC6D7DD.toInt())
-        tv.textSize = 15f
-        tv.setPadding(0, 0, 0, dp(20))
-        setDetail.addView(tv)
-    }
-
-    private fun addHint(text: String) {
-        val tv = TextView(this)
-        tv.text = text
-        tv.setTextColor(0xFF8BA4AD.toInt())
-        tv.textSize = 13f
-        tv.setPadding(0, dp(4), 0, dp(14))
-        setDetail.addView(tv)
-    }
-
-    /** Кликабельная строка-кнопка на всю ширину. */
-    private fun addActionRow(label: String, enabled: Boolean = true, onClick: () -> Unit) {
-        val tv = TextView(this)
-        tv.text = label
-        tv.setTextColor(0xFFEEF6F8.toInt())
-        tv.textSize = 17f
-        tv.setBackgroundResource(R.drawable.setrow_bg)
-        tv.setPadding(dp(16), dp(14), dp(16), dp(14))
-        tv.isFocusable = enabled
-        tv.isClickable = enabled
-        tv.alpha = if (enabled) 1f else 0.45f
-        tv.setOnClickListener { onClick() }
-        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-        lp.bottomMargin = dp(6)
-        setDetail.addView(tv, lp)
-    }
-
-    /**
-     * Ряд кнопок выбора («чипы») вместо переключателя.
-     * Текущее значение подсвечено, фокус ходит по кнопкам влево-вправо.
-     */
-    private fun addChipRow(label: String, options: List<String>, selectedIndex: Int, onSelect: (Int) -> Unit) {
-        val cap = TextView(this)
-        cap.text = label
-        cap.setTextColor(0xFF8BA4AD.toInt())
-        cap.textSize = 13f
-        cap.setPadding(dp(2), dp(10), 0, dp(6))
-        setDetail.addView(cap)
-
-        val row = LinearLayout(this)
-        row.orientation = LinearLayout.HORIZONTAL
-        for ((i, opt) in options.withIndex()) {
-            val chip = TextView(this)
-            chip.text = opt
-            chip.setTextColor(0xFFEEF6F8.toInt())
-            chip.textSize = 15f
-            chip.setBackgroundResource(R.drawable.chip_bg)
-            chip.isFocusable = true
-            chip.isClickable = true
-            chip.isSelected = (i == selectedIndex)
-            chip.setOnClickListener {
-                // выделение переключаем на месте, чтобы фокус не прыгал наверх
-                for (j in 0 until row.childCount) row.getChildAt(j).isSelected = (j == i)
-                onSelect(i)
+    /** Строки раздела — прямой аналог panelRows() из прототипа. */
+    private fun panelRows(kind: String): List<SdRow> {
+        val rows = ArrayList<SdRow>()
+        when (kind) {
+            "qr" -> {
+                rows.add(SdRow(qr = true))
+                rows.add(SdRow(cells = listOf(
+                    SdCell("btn", "Ввести ссылку вручную", "add", primary = true, wide = true) {
+                        showManualUrlDialog(fromPhoneSetup = false)
+                    }
+                )))
             }
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            lp.rightMargin = dp(8)
-            row.addView(chip, lp)
+            "sources" -> {
+                rows.add(SdRow(secIcon = "playlist_play", secTitle = "Плейлисты",
+                    secDesc = "Вставьте прямую ссылку на плейлист в формате M3U / M3U8. После добавления он появится в списке плейлистов."))
+                rows.add(SdRow(cells = listOf(
+                    SdCell("field", "", "", label2 = "Поле ввода для ссылки") { showManualUrlDialog(fromPhoneSetup = false) },
+                    SdCell("btn", "Добавить", "add", primary = true) { showManualUrlDialog(fromPhoneSetup = false) }
+                )))
+                for (cfg in Store.getPlaylistCfgs()) {
+                    rows.add(SdRow(cells = listOf(
+                        SdCell("name", cfg.name) { renamePlaylistDialog(cfg.name, cfg.url) },
+                        SdCell("ic", "", "edit") { renamePlaylistDialog(cfg.name, cfg.url) },
+                        SdCell("ic", "", "sync", refr = true) {
+                            toast("Обновляю плейлист…"); forceRefreshPlaylists()
+                        },
+                        SdCell("ic", "", "delete", del = true) { deletePlaylistDialog(cfg.name, cfg.url) }
+                    )))
+                }
+                rows.add(SdRow(cells = listOf(
+                    SdCell("btn", "Обновить все плейлисты", "sync", wide = true, lime = true) {
+                        toast("Обновляю плейлисты…"); forceRefreshPlaylists()
+                    }
+                )))
+                rows.add(SdRow(divider = true))
+                rows.add(SdRow(secIcon = "event_note", secTitle = "Источники ТВ-программы (EPG)",
+                    secDesc = "Ссылка на телепрограмму в формате XMLTV. Программа подтянется к каналам автоматически по их именам."))
+                rows.add(SdRow(cells = listOf(
+                    SdCell("field", "", "", label2 = "Поле ввода для ссылки") { showManualEpgDialog(fromPhoneSetup = false) },
+                    SdCell("btn", "Добавить", "add", primary = true) { showManualEpgDialog(fromPhoneSetup = false) }
+                )))
+                for (src in Store.getEpgSources()) {
+                    rows.add(SdRow(cells = listOf(
+                        SdCell("name", src.name) { renameEpgDialog(src.name, src.url) },
+                        SdCell("ic", "", "edit") { renameEpgDialog(src.name, src.url) },
+                        SdCell("ic", "", "sync", refr = true) { toast("Обновляю телепрограмму…"); forceRefreshEpg() },
+                        SdCell("ic", "", "delete", del = true) { deleteEpgDialog(src.name, src.url) }
+                    )))
+                }
+                rows.add(SdRow(cells = listOf(
+                    SdCell("btn", "Обновить все источники", "sync", wide = true, lime = true) {
+                        toast("Обновляю телепрограмму…"); forceRefreshEpg()
+                    }
+                )))
+            }
+            "quality" -> {
+                val qVals = listOf("auto", "stable", "max")
+                rows.add(SdRow(label = "Потолок качества", cells =
+                    listOf("Авто", "Стабильность", "Максимум").mapIndexed { i, o ->
+                        SdCell("chip", o, sel = Store.quality == qVals[i]) {
+                            Store.quality = qVals[i]; applyQuality(); refreshSetList()
+                            toast("Качество: ${Quality.qualityLabel()}"); rerenderDetail()
+                        }
+                    }))
+                val bufVals = listOf(5, 10, 15, 30, 60)
+                rows.add(SdRow(label = "Размер буфера", cells = bufVals.map { v ->
+                    SdCell("chip", "$v сек", sel = Store.bufferSec == v) {
+                        Store.bufferSec = v; rebuildPlayerKeepingChannel(); refreshSetList()
+                        toast("Буфер: $v сек"); rerenderDetail()
+                    }
+                }))
+                val offVals = listOf(0, 10, 20, 30, 60)
+                val offLabels = listOf("Как в потоке", "10 сек", "20 сек", "30 сек", "60 сек")
+                rows.add(SdRow(label = "Задержка от эфира", cells = offVals.mapIndexed { i, v ->
+                    SdCell("chip", offLabels[i], sel = Store.liveOffsetSec == v) {
+                        Store.liveOffsetSec = v; rebuildPlayerKeepingChannel()
+                        toast("Задержка: ${Quality.liveOffsetLabel()}"); rerenderDetail()
+                    }
+                }))
+                val retryVals = listOf("fast", "normal", "persistent")
+                rows.add(SdRow(label = "При обрыве связи", cells =
+                    listOf("Быстро сдаваться", "Обычно", "Упорно").mapIndexed { i, o ->
+                        SdCell("chip", o, sel = Store.retryMode == retryVals[i]) {
+                            Store.retryMode = retryVals[i]; rebuildPlayerKeepingChannel()
+                            toast("При обрыве: ${Quality.retryLabel()}"); rerenderDetail()
+                        }
+                    }))
+                val decVals = listOf("hw", "sw")
+                rows.add(SdRow(label = "Тип декодера", cells =
+                    listOf("Аппаратный (HW)", "Программный (SW)").mapIndexed { i, o ->
+                        SdCell("chip", o, sel = Store.decoder == decVals[i]) {
+                            Store.decoder = decVals[i]; rebuildPlayerKeepingChannel()
+                            toast("Декодер: ${Quality.decoderLabel()}"); rerenderDetail()
+                        }
+                    }))
+                rows.add(SdRow(label = "Автофреймрейт (AFR)", cells = listOf(
+                    SdCell("toggle", "", on = Store.afr) {
+                        Store.afr = !Store.afr
+                        if (!Store.afr) Quality.resetFrameRate(this) else applyAutoFrameRate()
+                        toast("Автофреймрейт: ${if (Store.afr) "вкл" else "выкл"}"); rerenderDetail()
+                    }
+                )))
+            }
+            "about" -> {
+                rows.add(SdRow(about = true))
+                rows.add(SdRow(cells = listOf(
+                    SdCell("btn", "Проверить обновление", "system_update", lime = true) {
+                        checkUpdates(silent = false)
+                    },
+                    SdCell("btn", "Откат на предыдущую версию", "settings_backup_restore", red = true) {
+                        rollbackVersion()
+                    }
+                )))
+            }
         }
-        val rlp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-        rlp.bottomMargin = dp(6)
-        setDetail.addView(row, rlp)
+        return rows
     }
 
-    // ---------- разделы ----------
+    private fun rerenderDetail() {
+        val r = setRow; val c = setCol
+        renderSetDetail(setSelected, setDetailActive)
+        setRow = r.coerceIn(0, (sdCellViews.size - 1).coerceAtLeast(0))
+        setCol = c
+        applySdFocus()
+    }
 
-    private fun buildQrDetail(active: Boolean) {
-        addTitle("Настройка через смартфон")
-        addDesc("Отсканируйте QR-код телефоном или откройте адрес в браузере. " +
-            "Телефон и ТВ должны быть в одной Wi-Fi сети. На странице настройки " +
-            "добавьте плейлист M3U — эфир запустится сам.")
+    // ---------- диалоги источников ----------
 
+    private fun renamePlaylistDialog(name: String, url: String) {
+        val inp = EditText(this); inp.setText(name)
+        AlertDialog.Builder(this).setTitle("Новое название").setView(inp)
+            .setPositiveButton("OK") { _, _ ->
+                Store.renamePlaylist(url, inp.text.toString().trim())
+                reloadFromStore(false); refreshSetList(); rerenderDetail()
+            }.setNegativeButton("Отмена", null).show()
+    }
+
+    private fun deletePlaylistDialog(name: String, url: String) {
+        AlertDialog.Builder(this).setTitle(name).setMessage("Удалить этот плейлист?")
+            .setPositiveButton("Удалить") { _, _ ->
+                Store.removePlaylist(url); currentChannel = null
+                reloadFromStore(false); refreshSetList(); rerenderDetail()
+                toast("Плейлист удалён")
+            }.setNegativeButton("Отмена", null).show()
+    }
+
+    private fun renameEpgDialog(name: String, url: String) {
+        val inp = EditText(this); inp.setText(name)
+        AlertDialog.Builder(this).setTitle("Новое название").setView(inp)
+            .setPositiveButton("OK") { _, _ ->
+                Store.renameEpgSource(url, inp.text.toString().trim())
+                refreshSetList(); rerenderDetail()
+            }.setNegativeButton("Отмена", null).show()
+    }
+
+    private fun deleteEpgDialog(name: String, url: String) {
+        AlertDialog.Builder(this).setTitle(name).setMessage("Удалить этот источник EPG?")
+            .setPositiveButton("Удалить") { _, _ ->
+                Store.removeEpgSource(url); forceRefreshEpg()
+                refreshSetList(); rerenderDetail()
+                toast("Источник EPG удалён")
+            }.setNegativeButton("Отмена", null).show()
+    }
+
+    // ---------- отрисовка ----------
+
+    private fun renderSetDetail(pos: Int, active: Boolean) {
+        setDetail.removeAllViews()
+        sdCellViews.clear()
+        sdCellModels.clear()
+        val item = setItems.getOrNull(pos) ?: return
+
+        // .sd-title: иконка + название раздела
+        val titleRow = LinearLayout(this)
+        titleRow.orientation = LinearLayout.HORIZONTAL
+        titleRow.gravity = Gravity.CENTER_VERTICAL
+        val tIcon = TextView(this)
+        IconFont.apply(tIcon, item.icon)
+        tIcon.setTextColor(0xFF63D4E2.toInt()); tIcon.textSize = 26f
+        titleRow.addView(tIcon)
+        val tText = TextView(this)
+        tText.text = item.label
+        tText.setTextColor(0xFFFFFFFF.toInt()); tText.textSize = 25f
+        tText.setTypeface(tText.typeface, android.graphics.Typeface.BOLD)
+        val tlp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        tlp.leftMargin = dp(12)
+        titleRow.addView(tText, tlp)
+        setDetail.addView(titleRow, mlp(bottom = 10))
+
+        // .sd-desc
+        val desc = sectionDesc(item.kind)
+        if (desc.isNotEmpty()) setDetail.addView(sdText(desc, 15f, 0xFFC6D7DD.toInt()), mlp(bottom = 22, maxW = 620))
+
+        for (r in panelRows(item.kind)) {
+            when {
+                r.secIcon != null -> setDetail.addView(sdSection(r), mlp(top = 18, bottom = 8))
+                r.divider -> {
+                    val v = View(this)
+                    v.setBackgroundColor(0x1AFFFFFF)
+                    setDetail.addView(v, LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, dp(1)).apply {
+                        topMargin = dp(22); bottomMargin = dp(4) })
+                }
+                r.about -> setDetail.addView(sdAboutCard(), mlp(bottom = 8).apply { gravity = Gravity.CENTER_HORIZONTAL })
+                r.qr -> setDetail.addView(sdQrBlock(), mlp(bottom = 8).apply { gravity = Gravity.CENTER_HORIZONTAL })
+                r.cells != null -> {
+                    val (view, cellViews) = sdCellRow(r)
+                    setDetail.addView(view, mlp(bottom = if (r.label.isNotEmpty()) 16 else 9))
+                    sdCellViews.add(cellViews)
+                    sdCellModels.add(r.cells)
+                }
+            }
+        }
+
+        if (setRow >= sdCellViews.size) setRow = (sdCellViews.size - 1).coerceAtLeast(0)
+        applySdFocus()
+    }
+
+    private fun mlp(top: Int = 0, bottom: Int = 0, maxW: Int = 0): LinearLayout.LayoutParams {
+        val lp = LinearLayout.LayoutParams(
+            if (maxW > 0) dp(maxW) else LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT)
+        lp.topMargin = dp(top); lp.bottomMargin = dp(bottom)
+        return lp
+    }
+
+    private fun sdText(t: String, size: Float, color: Int, bold: Boolean = false): TextView {
+        val tv = TextView(this)
+        tv.text = t; tv.textSize = size; tv.setTextColor(color)
+        tv.setLineSpacing(dp(4).toFloat(), 1f)
+        if (bold) tv.setTypeface(tv.typeface, android.graphics.Typeface.BOLD)
+        return tv
+    }
+
+    /** .sd-sec — заголовок секции с иконкой и пояснением. */
+    private fun sdSection(r: SdRow): View {
+        val box = LinearLayout(this)
+        box.orientation = LinearLayout.VERTICAL
+        val head = LinearLayout(this)
+        head.orientation = LinearLayout.HORIZONTAL
+        head.gravity = Gravity.CENTER_VERTICAL
+        val ic = TextView(this)
+        IconFont.apply(ic, r.secIcon ?: "")
+        ic.setTextColor(0xFF63D4E2.toInt()); ic.textSize = 20f
+        head.addView(ic)
+        val t = sdText(r.secTitle, 20f, 0xFFFFFFFF.toInt(), bold = true)
+        head.addView(t, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(9) })
+        box.addView(head)
+        if (r.secDesc.isNotEmpty()) {
+            box.addView(sdText(r.secDesc, 13.5f, 0xFFA9C0C8.toInt()),
+                LinearLayout.LayoutParams(dp(600), LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(5) })
+        }
+        return box
+    }
+
+    /** .sd-about — карточка с версией. */
+    private fun sdAboutCard(): View {
+        val card = LinearLayout(this)
+        card.orientation = LinearLayout.VERTICAL
+        card.gravity = Gravity.CENTER_HORIZONTAL
+        card.setBackgroundResource(R.drawable.sd_about)
+        card.setPadding(dp(30), dp(22), dp(30), dp(22))
+
+        val appRow = LinearLayout(this)
+        appRow.orientation = LinearLayout.HORIZONTAL
+        appRow.gravity = Gravity.CENTER_VERTICAL
+        val ic = TextView(this)
+        IconFont.apply(ic, "live_tv")
+        ic.setTextColor(0xFF63D4E2.toInt()); ic.textSize = 24f
+        appRow.addView(ic)
+        appRow.addView(sdText("BQDiptv", 22f, 0xFFFFFFFF.toInt(), bold = true),
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(11) })
+        card.addView(appRow)
+
+        val ver = sdText("Версия: ${UpdateManager.currentName(this)}\nСборка: ${UpdateManager.currentCode(this)} · Android TV",
+            14f, 0xFFA9C0C8.toInt())
+        ver.gravity = Gravity.CENTER
+        card.addView(ver, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(9) })
+        return card
+    }
+
+    /** QR-блок раздела «Настройка через смартфон». */
+    private fun sdQrBlock(): View {
+        val box = LinearLayout(this)
+        box.orientation = LinearLayout.VERTICAL
+        box.gravity = Gravity.CENTER_HORIZONTAL
         val url = "http://${IpUtil.localIp()}:${WebConfigServer.PORT}"
-
-        // QR по центру и крупнее
         val img = ImageView(this)
         try {
             val size = 480
@@ -2132,217 +2528,168 @@ class PlayerActivity : Activity() {
         } catch (_: Exception) { }
         img.setBackgroundColor(0xFFFFFFFF.toInt())
         img.setPadding(dp(10), dp(10), dp(10), dp(10))
-        val ilp = LinearLayout.LayoutParams(dp(280), dp(280))
-        ilp.gravity = Gravity.CENTER_HORIZONTAL
-        setDetail.addView(img, ilp)
-
-        // адрес по центру под QR
-        val tv = TextView(this)
-        tv.text = url
-        tv.setTextColor(0xFF63D4E2.toInt())
-        tv.textSize = 26f
+        box.addView(img, LinearLayout.LayoutParams(dp(260), dp(260)))
+        val tv = sdText(url, 24f, 0xFF63D4E2.toInt(), bold = true)
         tv.gravity = Gravity.CENTER
-        tv.setTypeface(tv.typeface, android.graphics.Typeface.BOLD)
-        val tlp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-        tlp.topMargin = dp(16)
-        tlp.bottomMargin = dp(10)
-        setDetail.addView(tv, tlp)
-
-        addActionRow("Ввести ссылку на плейлист вручную") { showManualUrlDialog(fromPhoneSetup = false) }
+        box.addView(tv, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(14) })
+        return box
     }
 
-    private fun buildSourcesDetail(active: Boolean) {
-        addTitle("Плейлисты и ТВ-программа")
-        addDesc("Добавляйте и удаляйте плейлисты (M3U / M3U8) и источники телепрограммы " +
-            "(EPG, XMLTV). Телепрограмма подтягивается к каналам автоматически по их именам.")
-
-        val cfgs = Store.getPlaylistCfgs()
-        addHint(if (cfgs.isEmpty()) "Плейлистов пока нет" else "Плейлисты (${cfgs.size})")
-        for (cfg in cfgs) {
-            addActionRow("${cfg.name}   —   изменить или удалить") { playlistActions(cfg.name, cfg.url) }
+    /** Фокусируемая строка: подпись (для «Качества») + ячейки. */
+    private fun sdCellRow(r: SdRow): Pair<View, List<View>> {
+        val wrap = LinearLayout(this)
+        wrap.orientation = LinearLayout.VERTICAL
+        if (r.label.isNotEmpty()) {
+            wrap.addView(sdText(r.label, 14f, 0xFF9FB6BF.toInt(), bold = true),
+                LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(9) })
         }
-
-        val srcs = Store.getEpgSources()
-        addHint(if (srcs.isEmpty()) "Источников EPG пока нет" else "Источники EPG (${srcs.size})")
-        for (src in srcs) {
-            addActionRow("${src.name}   —   изменить или удалить") { epgActions(src.name, src.url) }
+        val line = LinearLayout(this)
+        line.orientation = LinearLayout.HORIZONTAL
+        line.gravity = Gravity.CENTER_VERTICAL
+        val views = ArrayList<View>()
+        val cells = r.cells ?: emptyList()
+        for ((i, c) in cells.withIndex()) {
+            val v = sdCellView(c)
+            val lp = when {
+                c.type == "field" || (c.type == "name") ->
+                    LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                c.wide -> LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT)
+                else -> LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT)
+            }
+            if (i > 0) lp.leftMargin = dp(10)
+            line.addView(v, lp)
+            views.add(v)
         }
+        wrap.addView(line, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        return Pair(wrap, views)
+    }
 
-        addHint("Действия")
-        addActionRow("Добавить плейлист (ввести ссылку)") { showManualUrlDialog(fromPhoneSetup = false) }
-        addActionRow("Добавить источник EPG") { showManualEpgDialog(fromPhoneSetup = false) }
-        addActionRow("Обновить все источники") {
-            toast("Обновляю плейлисты и телепрограмму…")
-            forceRefreshPlaylists()
-            forceRefreshEpg()
+    /** Одна ячейка — аналог cellHtml() прототипа. */
+    private fun sdCellView(c: SdCell): View = when (c.type) {
+        "toggle" -> {
+            val box = LinearLayout(this)
+            box.orientation = LinearLayout.HORIZONTAL
+            box.gravity = Gravity.CENTER_VERTICAL
+            box.addView(sdText("выкл", 13f, if (c.on) 0xFF7F93AC.toInt() else 0xFFEAF4F7.toInt(), bold = true))
+            val track = FrameLayout(this)
+            track.setBackgroundResource(if (c.on) R.drawable.sd_track_on else R.drawable.sd_track_off)
+            val knob = View(this)
+            knob.setBackgroundResource(if (c.on) R.drawable.sd_knob_on else R.drawable.sd_knob)
+            val klp = FrameLayout.LayoutParams(dp(22), dp(22))
+            klp.topMargin = dp(4)
+            klp.leftMargin = if (c.on) dp(30) else dp(4)
+            track.addView(knob, klp)
+            box.addView(track, LinearLayout.LayoutParams(dp(56), dp(30)).apply {
+                leftMargin = dp(11); rightMargin = dp(11) })
+            box.addView(sdText("вкл", 13f, if (c.on) 0xFF63D4E2.toInt() else 0xFF7F93AC.toInt(), bold = true))
+            box.tag = track   // подсвечиваем именно дорожку
+            box
+        }
+        "chip" -> {
+            val tv = TextView(this)
+            tv.text = if (c.sel) "${c.label}  ✓" else c.label
+            tv.textSize = 14f
+            tv.setTypeface(tv.typeface, android.graphics.Typeface.BOLD)
+            tv.setTextColor(if (c.sel) 0xFFFFFFFF.toInt() else 0xFFC0D3DA.toInt())
+            tv.setBackgroundResource(if (c.sel) R.drawable.sd_chip_sel else R.drawable.sd_chip)
+            tv.setPadding(dp(20), dp(11), dp(20), dp(11))
+            tv
+        }
+        "ic" -> {
+            val tv = TextView(this)
+            IconFont.apply(tv, c.icon)
+            tv.textSize = 19f
+            tv.gravity = Gravity.CENTER
+            tv.setTextColor(when {
+                c.del -> 0xFFFF8A8A.toInt()
+                c.refr -> 0xFFA3E05F.toInt()
+                else -> 0xFFC0D3DA.toInt()
+            })
+            tv.setBackgroundResource(when {
+                c.del -> R.drawable.sd_ic_del
+                c.refr -> R.drawable.sd_ic_lime
+                else -> R.drawable.sd_ic
+            })
+            tv.layoutParams = LinearLayout.LayoutParams(dp(44), dp(44))
+            tv.setPadding(0, dp(11), 0, 0)
+            tv
+        }
+        "name" -> {
+            val tv = TextView(this)
+            tv.text = c.label
+            tv.textSize = 15f
+            tv.setTypeface(tv.typeface, android.graphics.Typeface.BOLD)
+            tv.setTextColor(0xFFEAF4F7.toInt())
+            tv.setBackgroundResource(R.drawable.sd_name)
+            tv.setPadding(dp(16), dp(13), dp(16), dp(13))
+            tv.isSingleLine = true
+            tv.ellipsize = android.text.TextUtils.TruncateAt.END
+            tv
+        }
+        "field" -> {
+            val tv = TextView(this)
+            tv.text = c.label2
+            tv.textSize = 15f
+            tv.setTextColor(0xFF6F8494.toInt())
+            tv.setBackgroundResource(R.drawable.sd_card)
+            tv.setPadding(dp(16), dp(14), dp(16), dp(14))
+            tv.isSingleLine = true
+            tv.ellipsize = android.text.TextUtils.TruncateAt.END
+            tv
+        }
+        else -> {  // btn
+            val row = LinearLayout(this)
+            row.orientation = LinearLayout.HORIZONTAL
+            row.gravity = Gravity.CENTER
+            row.setBackgroundResource(if (c.primary) R.drawable.sd_card_primary else R.drawable.sd_card)
+            row.setPadding(dp(16), dp(13), dp(16), dp(13))
+            val ic = TextView(this)
+            IconFont.apply(ic, c.icon)
+            ic.textSize = 18f
+            ic.setTextColor(when {
+                c.lime -> 0xFFA3E05F.toInt()
+                c.red -> 0xFFFF8A8A.toInt()
+                c.primary -> 0xFFDFF6FA.toInt()
+                else -> 0xFF63D4E2.toInt()
+            })
+            row.addView(ic)
+            val t = sdText(c.label, 14f, 0xFFDBE8ED.toInt(), bold = true)
+            row.addView(t, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(8) })
+            row
         }
     }
 
-    private fun playlistActions(name: String, url: String) {
-        AlertDialog.Builder(this).setTitle(name)
-            .setItems(arrayOf("Переименовать", "Удалить")) { _, act ->
-                if (act == 0) {
-                    val inp = EditText(this); inp.setText(name)
-                    AlertDialog.Builder(this).setTitle("Новое название").setView(inp)
-                        .setPositiveButton("OK") { _, _ ->
-                            Store.renamePlaylist(url, inp.text.toString().trim())
-                            reloadFromStore(false); refreshSetList(); renderSetDetail(setSelected, true)
-                        }
-                        .setNegativeButton("Отмена", null).show()
-                } else {
-                    Store.removePlaylist(url)
-                    currentChannel = null
-                    reloadFromStore(false)
-                    refreshSetList(); renderSetDetail(setSelected, true)
-                    toast("Плейлист удалён")
+    /** Подсветить текущую ячейку (аналог класса .focused в прототипе). */
+    private fun applySdFocus() {
+        for ((ri, row) in sdCellViews.withIndex()) {
+            for ((ci, v) in row.withIndex()) {
+                val on = setDetailActive && ri == setRow && ci == setCol
+                val target = (v.tag as? View) ?: v
+                target.isActivated = on
+            }
+        }
+        // подкрутить прокрутку так, чтобы активная строка была видна
+        if (setDetailActive) sdCellViews.getOrNull(setRow)?.firstOrNull()?.let { v ->
+            setDetailScroll.post {
+                // абсолютная позиция ячейки внутри прокручиваемого контейнера
+                var y = 0
+                var node: View? = v
+                while (node != null && node !== setDetail) {
+                    y += node.top
+                    node = node.parent as? View
                 }
-            }.show()
+                setDetailScroll.smoothScrollTo(0, (y - dp(140)).coerceAtLeast(0))
+            }
+        }
     }
 
-    private fun epgActions(name: String, url: String) {
-        AlertDialog.Builder(this).setTitle(name)
-            .setItems(arrayOf("Переименовать", "Удалить")) { _, act ->
-                if (act == 0) {
-                    val inp = EditText(this); inp.setText(name)
-                    AlertDialog.Builder(this).setTitle("Новое название").setView(inp)
-                        .setPositiveButton("OK") { _, _ ->
-                            Store.renameEpgSource(url, inp.text.toString().trim())
-                            refreshSetList(); renderSetDetail(setSelected, true)
-                        }
-                        .setNegativeButton("Отмена", null).show()
-                } else {
-                    Store.removeEpgSource(url)
-                    forceRefreshEpg()
-                    refreshSetList(); renderSetDetail(setSelected, true)
-                    toast("Источник EPG удалён")
-                }
-            }.show()
-    }
-
-    private fun buildQualityDetail(active: Boolean) {
-        addTitle("Качество трансляции")
-        addDesc("Параметры воспроизведения. При слабом интернете сильнее всего помогают " +
-            "«задержка от эфира» и упорное переподключение при обрыве.")
-
-        val qVals = listOf("auto", "stable", "max")
-        addChipRow("Потолок качества", listOf("Авто", "Стабильность", "Максимум"),
-            qVals.indexOf(Store.quality).coerceAtLeast(0)) { i ->
-            Store.quality = qVals[i]
-            applyQuality()   // применяется на лету, без перезапуска канала
-            refreshSetList()
-            toast("Качество: ${Quality.qualityLabel()}")
-        }
-
-        val bufVals = listOf(5, 10, 15, 30, 60)
-        addChipRow("Размер буфера", bufVals.map { "$it сек" },
-            bufVals.indexOf(Store.bufferSec).coerceAtLeast(0)) { i ->
-            Store.bufferSec = bufVals[i]
-            rebuildPlayerKeepingChannel()
-            refreshSetList()
-            toast("Буфер: ${bufVals[i]} сек")
-        }
-
-        val offVals = listOf(0, 10, 20, 30, 60)
-        addChipRow("Задержка от эфира", listOf("Как в потоке", "10 сек", "20 сек", "30 сек", "60 сек"),
-            offVals.indexOf(Store.liveOffsetSec).coerceAtLeast(0)) { i ->
-            Store.liveOffsetSec = offVals[i]
-            rebuildPlayerKeepingChannel()
-            toast("Задержка от эфира: ${Quality.liveOffsetLabel()}")
-        }
-
-        val retryVals = listOf("fast", "normal", "persistent")
-        addChipRow("При обрыве связи", listOf("Быстро сдаваться", "Обычно", "Упорно"),
-            retryVals.indexOf(Store.retryMode).coerceAtLeast(0)) { i ->
-            Store.retryMode = retryVals[i]
-            rebuildPlayerKeepingChannel()
-            toast("При обрыве: ${Quality.retryLabel()}")
-        }
-
-        val decVals = listOf("hw", "sw")
-        addChipRow("Тип декодера", listOf("Аппаратный (HW)", "Программный (SW)"),
-            decVals.indexOf(Store.decoder).coerceAtLeast(0)) { i ->
-            Store.decoder = decVals[i]
-            rebuildPlayerKeepingChannel()
-            toast("Декодер: ${Quality.decoderLabel()}")
-        }
-
-        addChipRow("Автофреймрейт", listOf("Выключен", "Включён"),
-            if (Store.afr) 1 else 0) { i ->
-            Store.afr = (i == 1)
-            if (!Store.afr) Quality.resetFrameRate(this) else applyAutoFrameRate()
-            toast("Автофреймрейт: ${if (Store.afr) "вкл" else "выкл"}")
-        }
-
-        addHint("Программный декодер медленнее, но устойчивее, если картинка сыпется. " +
-            "Автофреймрейт убирает рывки, но на секунду гасит экран при переключении.")
-    }
-
-    private fun buildAboutDetail(active: Boolean) {
-        addTitle("О программе")
-
-        // блок версии — по центру и по ширине текста
-        val box = TextView(this)
-        box.text = "BQDiptv\nверсия ${UpdateManager.currentName(this)}"
-        box.setTextColor(0xFFEEF6F8.toInt())
-        box.textSize = 20f
-        box.gravity = Gravity.CENTER
-        box.setBackgroundResource(R.drawable.version_box)
-        box.setPadding(dp(28), dp(18), dp(28), dp(18))
-        val blp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-        blp.gravity = Gravity.CENTER_HORIZONTAL
-        blp.bottomMargin = dp(22)
-        setDetail.addView(box, blp)
-
-        // две кнопки в один ряд, по ширине содержимого
-        val row = LinearLayout(this)
-        row.orientation = LinearLayout.HORIZONTAL
-
-        val btnUpd = TextView(this)
-        btnUpd.text = "Проверить обновление"
-        btnUpd.setTextColor(0xFFEEF6F8.toInt())
-        btnUpd.textSize = 16f
-        btnUpd.gravity = Gravity.CENTER
-        btnUpd.setBackgroundResource(R.drawable.btn_update)
-        btnUpd.setPadding(dp(22), dp(14), dp(22), dp(14))
-        btnUpd.isFocusable = true
-        btnUpd.isClickable = true
-        btnUpd.setOnClickListener { checkUpdates(silent = false) }
-        val ulp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-        ulp.rightMargin = dp(12)
-        row.addView(btnUpd, ulp)
-
-        val btnBack = TextView(this)
-        btnBack.text = "Откат на версию"
-        btnBack.setTextColor(0xFFEEF6F8.toInt())
-        btnBack.textSize = 16f
-        btnBack.gravity = Gravity.CENTER
-        btnBack.setBackgroundResource(R.drawable.btn_rollback)
-        btnBack.setPadding(dp(22), dp(14), dp(22), dp(14))
-        btnBack.isFocusable = true
-        btnBack.isClickable = true
-        btnBack.setOnClickListener { rollbackVersion() }
-        row.addView(btnBack, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-
-        val rlp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-        rlp.gravity = Gravity.CENTER_HORIZONTAL
-        setDetail.addView(row, rlp)
-
-        addHint("Обновление скачивается из релизов проекта на GitHub. " +
-            "Откат ставит предыдущую версию, настройки при этом сохраняются.")
-    }
-
-    /** Находится ли view внутри правой колонки деталей. */
-    private fun isInSetDetail(v: View?): Boolean {
-        var p: View? = v
-        while (p != null) {
-            if (p === setDetail) return true
-            p = p.parent as? View
-        }
-        return false
-    }
-
-    /** Обработка клавиш в панели настроек. Навигация НЕ зацикливается. */
+    /** Обработка клавиш в панели настроек — двумерная сетка, как в прототипе. */
     private fun handleSettingsKey(event: KeyEvent): Boolean {
         if (event.action != KeyEvent.ACTION_DOWN) return super.dispatchKeyEvent(event)
         when (event.keyCode) {
@@ -2352,21 +2699,38 @@ class PlayerActivity : Activity() {
             }
             KeyEvent.KEYCODE_DPAD_LEFT -> {
                 if (!setDetailActive) { closeSettingsPanel(); return true }
-                // из деталей влево уходим в список только с самого левого элемента,
-                // иначе влево ходим по чипам
-                val f = currentFocus
-                val left = f?.focusSearch(View.FOCUS_LEFT)
-                // если слева ничего нет ИЛИ это уже вне деталей — возвращаемся в список
-                if (f == null || left == null || !isInSetDetail(left)) { leaveSetDetail(); return true }
-                return super.dispatchKeyEvent(event)
+                // влево внутри строки; с первой ячейки — назад в список разделов
+                if (setCol > 0) { setCol--; applySdFocus() } else leaveSetDetail()
+                return true
             }
             KeyEvent.KEYCODE_DPAD_RIGHT -> {
                 if (!setDetailActive) { enterSetDetail(setList.selectedItemPosition.coerceAtLeast(0)); return true }
-                return super.dispatchKeyEvent(event)
+                val n = sdCellModels.getOrNull(setRow)?.size ?: 0
+                if (setCol < n - 1) { setCol++; applySdFocus() }
+                return true
+            }
+            KeyEvent.KEYCODE_DPAD_UP -> {
+                if (!setDetailActive) return super.dispatchKeyEvent(event)
+                if (setRow > 0) {
+                    setRow--
+                    setCol = setCol.coerceAtMost((sdCellModels.getOrNull(setRow)?.size ?: 1) - 1).coerceAtLeast(0)
+                    applySdFocus()
+                }
+                return true
+            }
+            KeyEvent.KEYCODE_DPAD_DOWN -> {
+                if (!setDetailActive) return super.dispatchKeyEvent(event)
+                if (setRow < sdCellViews.size - 1) {
+                    setRow++
+                    setCol = setCol.coerceAtMost((sdCellModels.getOrNull(setRow)?.size ?: 1) - 1).coerceAtLeast(0)
+                    applySdFocus()
+                }
+                return true
             }
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
                 if (!setDetailActive) { enterSetDetail(setList.selectedItemPosition.coerceAtLeast(0)); return true }
-                return super.dispatchKeyEvent(event)
+                sdCellModels.getOrNull(setRow)?.getOrNull(setCol)?.action?.invoke()
+                return true
             }
         }
         return super.dispatchKeyEvent(event)
@@ -2386,7 +2750,7 @@ class PlayerActivity : Activity() {
         toastView.text = msg
         val wasHidden = toastView.visibility != View.VISIBLE
         toastView.visibility = View.VISIBLE
-        if (wasHidden) animOsdUp(toastView)
+        if (wasHidden) animToastUp(toastView)
         handler.removeCallbacks(hideToastRunnable)
         handler.postDelayed(hideToastRunnable, 2200)
     }

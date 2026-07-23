@@ -1,7 +1,6 @@
 package ru.bqd.iptv
 
 import android.content.Context
-import android.graphics.Color
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -9,7 +8,11 @@ import android.widget.BaseAdapter
 import android.widget.LinearLayout
 import android.widget.TextView
 
-/** Пункт левого меню. type: SETTINGS / SEARCH / ALL / GROUP */
+/**
+ * Пункт левого меню.
+ * type: SETTINGS / SEARCH / FAV / PLSEL / ALL / GROUP — ровно те же типы,
+ * что в catItems() прототипа.
+ */
 data class CatItem(val title: String, val count: Int, val type: String, val group: String? = null)
 
 class CategoryAdapter(
@@ -18,6 +21,11 @@ class CategoryAdapter(
     /** Компактный режим (рейка): остаются только иконки. */
     private val compact: Boolean = false
 ) : BaseAdapter() {
+
+    companion object {
+        private const val TYPE_ROW = 0
+        private const val TYPE_PLSEL = 1
+    }
 
     /** Активная категория в рейке (подсвечивается). -1 — нет. */
     var activePos: Int = -1
@@ -29,17 +37,44 @@ class CategoryAdapter(
     override fun getItem(p: Int) = items[p]
     override fun getItemId(p: Int) = p.toLong()
 
+    override fun getViewTypeCount() = 2
+
+    // в рейке селектор плейлиста рисуется обычной иконкой, поэтому спец-тип
+    // используется только в развёрнутом меню
+    override fun getItemViewType(position: Int): Int =
+        if (!compact && items[position].type == "PLSEL") TYPE_PLSEL else TYPE_ROW
+
     /** Иконка пункта: служебные — фиксированные, группы — по смыслу названия. */
     private fun iconName(item: CatItem): String = when (item.type) {
         "SETTINGS" -> "settings"
         "SEARCH" -> "search"
-        "ALL" -> if (item.title.contains("избранн", true)) "star" else "apps"
+        "FAV" -> "star"
+        "PLSEL" -> "playlist_play"
+        "ALL" -> "apps"
         else -> GroupIcons.iconFor(item.group ?: item.title)
     }
 
     override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
-        val v = convertView ?: LayoutInflater.from(ctx).inflate(R.layout.item_category, parent, false)
         val item = items[position]
+        return if (getItemViewType(position) == TYPE_PLSEL) {
+            plSelView(item, convertView, parent)
+        } else {
+            rowView(item, position, convertView, parent)
+        }
+    }
+
+    /** Строка-«таблетка» выбора плейлиста (#plSel в прототипе). */
+    private fun plSelView(item: CatItem, convertView: View?, parent: ViewGroup?): View {
+        val v = convertView
+            ?: LayoutInflater.from(ctx).inflate(R.layout.item_playlist_sel, parent, false)
+        v.findViewById<TextView>(R.id.plSelName).text = item.title
+        return v
+    }
+
+    /** Обычная строка меню: иконка • название • счётчик-таблетка. */
+    private fun rowView(item: CatItem, position: Int, convertView: View?, parent: ViewGroup?): View {
+        val v = convertView
+            ?: LayoutInflater.from(ctx).inflate(R.layout.item_category, parent, false)
         val icon = v.findViewById<TextView>(R.id.catIcon)
         val left = v.findViewById<TextView>(R.id.catName)
         val right = v.findViewById<TextView>(R.id.catCount)
@@ -68,14 +103,6 @@ class CategoryAdapter(
                 right.text = ""
                 right.visibility = View.GONE
             }
-        }
-
-        // служебные пункты отличаем цветом иконки; фон строки больше не красим —
-        // выделение рисует общий фокус списка
-        when (item.type) {
-            "SETTINGS" -> icon.setTextColor(Color.parseColor("#F0B24A"))
-            "SEARCH" -> icon.setTextColor(Color.parseColor("#A8E05F"))
-            else -> icon.setTextColor(Color.parseColor("#63D4E2"))
         }
         return v
     }

@@ -196,7 +196,7 @@
             <ListView android:id="@+id/browserListView"
                 android:layout_width="match_parent" android:layout_height="match_parent"
                 android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true"
-                android:divider="@color/hairline" android:dividerHeight="1dp"
+                android:divider="@null" android:dividerHeight="0dp"
                 android:scrollbars="none"
                 android:paddingTop="6dp" android:paddingBottom="6dp"
                 android:clipToPadding="false" />
@@ -250,33 +250,6 @@
                 android:singleLine="true" android:ellipsize="end" />
         </LinearLayout>
     </FrameLayout>
-
-    <LinearLayout
-        android:id="@+id/leftMenu"
-        android:layout_width="392dp" android:layout_height="match_parent"
-        android:layout_gravity="left" android:orientation="vertical"
-        android:background="@drawable/panel_bg_left"
-        android:paddingLeft="16dp" android:paddingRight="16dp"
-        android:paddingTop="54dp" android:paddingBottom="20dp" android:visibility="gone">
-
-        <TextView android:id="@+id/plSelector"
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:gravity="center" android:textColor="@color/text" android:textSize="20sp"
-            android:textStyle="bold" android:background="@drawable/plsel_bg" android:padding="12dp" />
-
-        <TextView
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:gravity="center" android:textColor="@color/text_dim" android:textSize="12sp"
-            android:paddingTop="4dp" android:paddingBottom="8dp" android:text="◀ ▶ — смена плейлиста" />
-
-        <ListView android:id="@+id/catList"
-            android:layout_width="match_parent" android:layout_height="match_parent"
-            android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true"
-            android:divider="@color/hairline" android:dividerHeight="1dp"
-            android:scrollbars="none"
-            android:paddingTop="8dp" android:paddingBottom="8dp"
-            android:clipToPadding="false" />
-    </LinearLayout>
 
     <LinearLayout
         android:id="@+id/rightPanel"
@@ -461,14 +434,24 @@
         ширина рейки). Рейка (см. railPanel ниже) рисуется поверх левых
         116dp, поэтому поле ввода и результаты начинаются правее неё.
     -->
-    <LinearLayout
+    <FrameLayout
         android:id="@+id/searchOverlay"
         android:layout_width="match_parent" android:layout_height="match_parent"
-        android:orientation="vertical"
         android:background="@color/overlay_dark"
-        android:paddingStart="116dp" android:paddingEnd="28dp"
-        android:paddingTop="52dp" android:paddingBottom="28dp"
         android:visibility="gone">
+
+      <!--
+          Содержимое вынесено в отдельный контейнер: в прототипе класс
+          rail-shift даёт содержимому поиска анимацию railIn/railOut
+          (выезд из-под рейки и уход обратно). Сама подложка при этом
+          только гаснет, иначе при сдвиге справа оголялось бы видео.
+      -->
+      <LinearLayout
+        android:id="@+id/searchContent"
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:paddingStart="116dp" android:paddingEnd="28dp"
+        android:paddingTop="52dp" android:paddingBottom="28dp">
 
         <TextView
             android:layout_width="wrap_content" android:layout_height="wrap_content"
@@ -504,7 +487,8 @@
             android:scrollbars="none"
             android:paddingTop="6dp" android:paddingBottom="6dp"
             android:clipToPadding="false" />
-    </LinearLayout>
+      </LinearLayout>
+    </FrameLayout>
 
     <FrameLayout
         android:id="@+id/screensaver"
@@ -561,7 +545,7 @@
                 android:layout_width="match_parent" android:layout_height="match_parent"
                 android:listSelector="@drawable/list_focus"
                 android:drawSelectorOnTop="true"
-                android:divider="@color/hairline" android:dividerHeight="1dp"
+                android:divider="@null" android:dividerHeight="0dp"
                 android:scrollbars="none"
                 android:paddingTop="6dp" android:paddingBottom="6dp"
                 android:clipToPadding="false" />
@@ -584,25 +568,28 @@
     </FrameLayout>
 
     <!--
-        Рейка категорий (см. описание выше) размещена ПОСЛЕ browserOverlay,
-        searchOverlay и settingsPanel, поэтому рисуется поверх каждой из них,
-        когда видима. Фокус на неё не переводится (см. п.8 в knowledge —
-        осознанное решение, чтобы не плодить лишнюю зону фокуса на Android TV).
+        Левое меню (#leftMenu в прототипе). Селектор плейлиста больше НЕ отдельный
+        элемент сверху: в прототипе он — обычная строка списка (type PLSEL) между
+        верхним блоком (Настройки/Поиск/Избранное) и списком категорий. Так навигация
+        вверх-вниз становится линейной по всему меню, ровно как в catItems().
+        Разделителей между строками в прототипе нет — линия рисуется только
+        под верхним блоком, её рисует сам адаптер в строке PLSEL.
     -->
     <LinearLayout
-        android:id="@+id/railPanel"
-        android:layout_width="88dp" android:layout_height="match_parent"
-        android:orientation="vertical"
+        android:id="@+id/leftMenu"
+        android:layout_width="392dp" android:layout_height="match_parent"
+        android:layout_gravity="left" android:orientation="vertical"
         android:background="@drawable/panel_bg_left"
-        android:paddingLeft="10dp" android:paddingRight="10dp"
-        android:paddingTop="46dp" android:paddingBottom="16dp"
-        android:visibility="gone">
+        android:paddingLeft="16dp" android:paddingRight="16dp"
+        android:paddingTop="54dp" android:paddingBottom="20dp" android:visibility="gone">
 
-        <ListView android:id="@+id/railListView"
+        <ListView android:id="@+id/catList"
             android:layout_width="match_parent" android:layout_height="match_parent"
             android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true"
             android:divider="@null" android:dividerHeight="0dp"
-            android:scrollbars="none" />
+            android:scrollbars="none"
+            android:paddingTop="8dp" android:paddingBottom="8dp"
+            android:clipToPadding="false" />
     </LinearLayout>
 
     <!-- тост: строго по центру по горизонтали -->

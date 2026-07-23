@@ -69,6 +69,10 @@ object IconFont {
         "church" to 0xEAAE,
         "cloud" to 0xE2BD,
         "delete" to 0xE872,
+        // добавлено для правой колонки настроек (см. codepoints шрифта)
+        "sync" to 0xE627,
+        "edit" to 0xE3C9,
+        "event_note" to 0xE616,
         "directions_car" to 0xE531,
         "explicit" to 0xE01E,
         "favorite" to 0xE87D,
