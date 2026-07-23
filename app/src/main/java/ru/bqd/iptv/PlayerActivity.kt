@@ -141,6 +141,8 @@ class PlayerActivity : Activity() {
 
     // панель настроек
     private lateinit var settingsPanel: View
+    private lateinit var setListPanel: View
+    private lateinit var setListVersion: TextView
     private lateinit var setList: ListView
     private lateinit var setDetail: LinearLayout
     private lateinit var setDetailScroll: View
@@ -237,6 +239,8 @@ class PlayerActivity : Activity() {
         railListView.isFocusableInTouchMode = false
         railListView.isEnabled = false
         settingsPanel = findViewById(R.id.settingsPanel)
+        setListPanel = findViewById(R.id.setListPanel)
+        setListVersion = findViewById(R.id.setListVersion)
         setList = findViewById(R.id.setList)
         setDetail = findViewById(R.id.setDetail)
         setDetailScroll = findViewById(R.id.setDetailScroll)
@@ -302,6 +306,17 @@ class PlayerActivity : Activity() {
         }
         leftMenu.layoutParams = leftMenu.layoutParams.apply { width = minOf(dpx(392), (w * 0.85).toInt()) }
         rightPanel.layoutParams = rightPanel.layoutParams.apply { width = minOf(dpx(520), (w * 0.9).toInt()) }
+
+        val setListW = minOf(dpx(400), (w * 0.55).toInt()).coerceAtLeast(dpx(260))
+        (setListPanel.layoutParams as? FrameLayout.LayoutParams)?.let {
+            it.leftMargin = railW
+            it.width = setListW
+            setListPanel.layoutParams = it
+        }
+        (setDetailScroll.layoutParams as? FrameLayout.LayoutParams)?.let {
+            it.leftMargin = railW + setListW
+            setDetailScroll.layoutParams = it
+        }
     }
 
     /**
@@ -986,9 +1001,21 @@ class PlayerActivity : Activity() {
         leftMenu.visibility = View.GONE
         rightPanel.visibility = View.GONE
         if (::settingsPanel.isInitialized) settingsPanel.visibility = View.GONE
+        if (::railPanel.isInitialized) railPanel.visibility = View.GONE
         setDetailActive = false
         panel = Panel.NONE
         if (isPhone && currentChannel != null) phoneBar.visibility = View.VISIBLE
+    }
+
+    /**
+     * Показать общую рейку категорий поверх текущей панели (браузер каналов,
+     * поиск или настройки) с подсветкой активного пункта. В прототипе это
+     * один и тот же #leftMenu.collapsed для всех трёх экранов.
+     */
+    private fun showRail(activeOverrideType: String? = null) {
+        railPanel.visibility = View.VISIBLE
+        refreshRail(activeOverrideType)
+        animPanelInLeft(railPanel)
     }
 
     private fun openChannelBrowser() {
@@ -1018,10 +1045,10 @@ class PlayerActivity : Activity() {
         })
         browserActionFocused = false
         adapter.actionFocused = false
-        refreshRail()
+        browserListView.setSelector(R.drawable.list_focus)
         browserOverlay.visibility = View.VISIBLE
         animFadeIn(browserOverlay)
-        animPanelInLeft(railPanel)
+        showRail()
         animRailIn(browserList)
         animOsdUp(previewCard)
         browserListView.requestFocus()
@@ -1037,12 +1064,17 @@ class PlayerActivity : Activity() {
      * где мы находимся; чтобы сменить категорию, нажимаем «влево» и
      * попадаем в развёрнутое меню.
      */
-    private fun refreshRail() {
+    private fun refreshRail(activeOverrideType: String? = null) {
         val items = buildCatItems(curPlaylistIdx)
         val adapter = CategoryAdapter(this, items, compact = true)
-        // подсвечиваем текущую категорию
-        val active = if (curCategory == null) items.indexOfFirst { it.type == "ALL" }
-        else items.indexOfFirst { it.type == "GROUP" && it.group == curCategory }
+        // подсвечиваем текущую категорию: либо служебный пункт (настройки/поиск),
+        // либо активная группа каналов
+        val active = when (activeOverrideType) {
+            "SETTINGS" -> items.indexOfFirst { it.type == "SETTINGS" }
+            "SEARCH" -> items.indexOfFirst { it.type == "SEARCH" }
+            else -> if (curCategory == null) items.indexOfFirst { it.type == "ALL" }
+                    else items.indexOfFirst { it.type == "GROUP" && it.group == curCategory }
+        }
         adapter.activePos = active
         railListView.adapter = adapter
         if (active >= 0) railListView.setSelection(active)
@@ -1053,17 +1085,27 @@ class PlayerActivity : Activity() {
      * На канале: вправо — фокус на кнопку действия, OK — смотреть.
      * На кнопке: вправо — смотреть, влево — назад на канал, OK — избранное.
      */
+    /**
+     * Переключить фокус на кнопку действия строки (звезда/корзина) и обратно.
+     * Синхронно с этим строка гасит своё обычное свечение (состояние
+     * "delactive" из прототипа) — иначе выглядело бы так, будто подсвечены
+     * сразу два элемента (строка целиком и кнопка на ней).
+     */
+    private fun setBrowserActionFocused(focused: Boolean) {
+        browserActionFocused = focused
+        (browserListView.adapter as? ChannelAdapter)?.actionFocused = focused
+        browserListView.setSelector(if (focused) R.drawable.list_focus_delactive else R.drawable.list_focus)
+    }
+
     private fun handleBrowserKey(event: KeyEvent): Boolean {
         if (event.action != KeyEvent.ACTION_DOWN) return super.dispatchKeyEvent(event)
-        val adapter = browserListView.adapter as? ChannelAdapter
         val pos = browserListView.selectedItemPosition
 
         when (event.keyCode) {
             KeyEvent.KEYCODE_DPAD_RIGHT -> {
                 if (!browserActionFocused) {
                     if (pos >= 0 && pos < browserChannels.size) {
-                        browserActionFocused = true
-                        adapter?.actionFocused = true
+                        setBrowserActionFocused(true)
                     }
                 } else {
                     // с кнопки вправо — запуск просмотра
@@ -1077,8 +1119,7 @@ class PlayerActivity : Activity() {
             }
             KeyEvent.KEYCODE_DPAD_LEFT -> {
                 if (browserActionFocused) {
-                    browserActionFocused = false
-                    adapter?.actionFocused = false
+                    setBrowserActionFocused(false)
                     return true
                 }
                 handler.removeCallbacks(livePreviewRunnable)
@@ -1094,8 +1135,7 @@ class PlayerActivity : Activity() {
             }
             KeyEvent.KEYCODE_BACK -> {
                 if (browserActionFocused) {
-                    browserActionFocused = false
-                    adapter?.actionFocused = false
+                    setBrowserActionFocused(false)
                     return true
                 }
                 cancelBrowse()
@@ -1104,8 +1144,7 @@ class PlayerActivity : Activity() {
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
                 // при движении по списку фокус кнопки снимается
                 if (browserActionFocused) {
-                    browserActionFocused = false
-                    adapter?.actionFocused = false
+                    setBrowserActionFocused(false)
                 }
             }
         }
@@ -1367,6 +1406,8 @@ class PlayerActivity : Activity() {
         searchResults.adapter = null
         searchStatus.text = "Введите название. Поиск идёт по идущим сейчас, будущим и доступным в архиве передачам."
         searchOverlay.visibility = View.VISIBLE
+        animFadeIn(searchOverlay)
+        showRail("SEARCH")
         searchInput.requestFocus()
         val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
         imm?.showSoftInput(searchInput, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
@@ -1377,6 +1418,7 @@ class PlayerActivity : Activity() {
         val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
         imm?.hideSoftInputFromWindow(searchInput.windowToken, 0)
         searchOverlay.visibility = View.GONE
+        if (::railPanel.isInitialized) railPanel.visibility = View.GONE
         if (isPhone && currentChannel != null) phoneBar.visibility = View.VISIBLE
     }
 
@@ -1918,9 +1960,11 @@ class PlayerActivity : Activity() {
         phoneBar.visibility = View.GONE
         setDetailActive = false
         setList.isFocusable = true
+        setListVersion.text = "BQDiptv · ${UpdateManager.currentName(this)}"
         settingsPanel.visibility = View.VISIBLE
         animFadeIn(settingsPanel)
-        animPanelInLeft(setList)
+        showRail("SETTINGS")
+        animRailIn(setListPanel)
 
         val adapter = SettingsAdapter(this, setItems) { setValueFor(it) }
         setList.adapter = adapter

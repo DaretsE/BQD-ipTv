@@ -165,22 +165,6 @@
         android:layout_width="match_parent" android:layout_height="match_parent"
         android:background="@color/overlay_soft" android:visibility="gone">
 
-        <!-- свёрнутая рейка: только иконки категорий -->
-        <LinearLayout
-            android:id="@+id/railPanel"
-            android:layout_width="88dp" android:layout_height="match_parent"
-            android:orientation="vertical"
-            android:background="@drawable/panel_bg_left"
-            android:paddingLeft="10dp" android:paddingRight="10dp"
-            android:paddingTop="46dp" android:paddingBottom="16dp">
-
-            <ListView android:id="@+id/railListView"
-                android:layout_width="match_parent" android:layout_height="match_parent"
-                android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true"
-                android:divider="@null" android:dividerHeight="0dp"
-                android:scrollbars="none" />
-        </LinearLayout>
-
         <LinearLayout
             android:id="@+id/browserList"
             android:layout_width="540dp" android:layout_height="match_parent"
@@ -471,39 +455,55 @@
         </LinearLayout>
     </ScrollView>
 
+    <!--
+        Поиск передач: в прототипе живёт в одном пространстве с рейкой
+        категорий (#search.rail-shift{padding-left:116px} = 28 базовых + 88
+        ширина рейки). Рейка (см. railPanel ниже) рисуется поверх левых
+        116dp, поэтому поле ввода и результаты начинаются правее неё.
+    -->
     <LinearLayout
         android:id="@+id/searchOverlay"
         android:layout_width="match_parent" android:layout_height="match_parent"
         android:orientation="vertical"
-        android:background="@color/overlay_dark" android:padding="20dp" android:visibility="gone">
+        android:background="@color/overlay_dark"
+        android:paddingStart="116dp" android:paddingEnd="28dp"
+        android:paddingTop="52dp" android:paddingBottom="28dp"
+        android:visibility="gone">
 
         <TextView
             android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:text="🔎  Поиск передачи" android:textColor="@color/text"
-            android:textSize="26sp" android:textStyle="bold" android:paddingBottom="12dp" />
+            android:textSize="26sp" android:textStyle="bold" android:paddingBottom="14dp" />
 
-        <EditText
-            android:id="@+id/searchInput"
+        <FrameLayout
             android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:hint="Название фильма или передачи"
-            android:textColor="@color/text" android:textColorHint="@color/text_dim2"
-            android:textSize="20sp" android:padding="14dp"
-            android:background="@color/card_bg"
-            android:singleLine="true"
-            android:imeOptions="actionSearch"
-            android:inputType="text" />
+            android:background="@color/card_bg">
+
+            <EditText
+                android:id="@+id/searchInput"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:hint="Название фильма или передачи"
+                android:textColor="@color/text" android:textColorHint="@color/text_dim2"
+                android:textSize="20sp" android:padding="16dp"
+                android:background="@null"
+                android:singleLine="true"
+                android:imeOptions="actionSearch"
+                android:inputType="text" />
+        </FrameLayout>
 
         <TextView
             android:id="@+id/searchStatus"
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:textColor="@color/text_dim" android:textSize="14sp"
-            android:paddingTop="10dp" android:paddingBottom="6dp" />
+            android:paddingTop="14dp" android:paddingBottom="6dp" />
 
         <ListView
             android:id="@+id/searchResults"
             android:layout_width="match_parent" android:layout_height="match_parent"
             android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true" android:divider="@color/hairline" android:dividerHeight="1dp"
-            android:scrollbars="none" />
+            android:scrollbars="none"
+            android:paddingTop="6dp" android:paddingBottom="6dp"
+            android:clipToPadding="false" />
     </LinearLayout>
 
     <FrameLayout
@@ -516,26 +516,45 @@
             android:textColor="#3C5A63" android:textSize="56sp" />
     </FrameLayout>
 
-    <!-- панель настроек: слева список разделов, справа детали -->
-    <LinearLayout
+    <!--
+        Панель настроек — как #setPanel в прототипе: полупрозрачная подложка
+        на весь экран, список разделов шириной 400dp сдвинут на 88dp вправо
+        (место под рейку), детали начинаются с 488dp. Ширина и отступ левой
+        колонки клэмпаются в clampPanels() так же, как у списка каналов.
+    -->
+    <FrameLayout
         android:id="@+id/settingsPanel"
         android:layout_width="match_parent" android:layout_height="match_parent"
-        android:orientation="horizontal"
-        android:background="@color/overlay_dark"
+        android:background="@color/overlay_soft"
         android:visibility="gone">
 
         <LinearLayout
+            android:id="@+id/setListPanel"
             android:layout_width="400dp" android:layout_height="match_parent"
+            android:layout_marginLeft="88dp"
             android:orientation="vertical"
             android:background="@drawable/panel_bg_left"
-            android:paddingLeft="16dp" android:paddingRight="16dp"
-            android:paddingTop="28dp" android:paddingBottom="16dp">
+            android:paddingLeft="30dp" android:paddingRight="16dp"
+            android:paddingTop="54dp" android:paddingBottom="16dp">
+
+            <TextView android:id="@+id/setListVersion"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:textColor="@color/accent2" android:textSize="12sp" android:textStyle="bold"
+                android:letterSpacing="0.12" android:alpha="0.9"
+                android:paddingLeft="4dp" android:paddingRight="4dp" android:paddingBottom="6dp"
+                android:singleLine="true" android:ellipsize="end" />
 
             <TextView
                 android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:text="Настройки"
-                android:textColor="@color/accent2" android:textSize="24sp"
-                android:textStyle="bold" android:paddingBottom="14dp" />
+                android:textColor="#FFFFFFFF" android:textSize="22sp" android:textStyle="bold"
+                android:paddingLeft="4dp" android:paddingRight="4dp"
+                android:paddingTop="6dp" android:paddingBottom="8dp" />
+
+            <View
+                android:layout_width="40dp" android:layout_height="3dp"
+                android:layout_marginLeft="4dp" android:layout_marginBottom="12dp"
+                android:background="@drawable/hdr_underline" />
 
             <ListView
                 android:id="@+id/setList"
@@ -543,14 +562,18 @@
                 android:listSelector="@drawable/list_focus"
                 android:drawSelectorOnTop="true"
                 android:divider="@color/hairline" android:dividerHeight="1dp"
-                android:scrollbars="none" />
+                android:scrollbars="none"
+                android:paddingTop="6dp" android:paddingBottom="6dp"
+                android:clipToPadding="false" />
         </LinearLayout>
 
         <ScrollView
             android:id="@+id/setDetailScroll"
             android:layout_width="match_parent" android:layout_height="match_parent"
+            android:layout_marginLeft="488dp"
+            android:background="@color/panel"
             android:paddingLeft="34dp" android:paddingRight="34dp"
-            android:paddingTop="34dp" android:paddingBottom="28dp"
+            android:paddingTop="52dp" android:paddingBottom="36dp"
             android:scrollbars="none">
 
             <LinearLayout
@@ -558,6 +581,28 @@
                 android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:orientation="vertical" />
         </ScrollView>
+    </FrameLayout>
+
+    <!--
+        Рейка категорий (см. описание выше) размещена ПОСЛЕ browserOverlay,
+        searchOverlay и settingsPanel, поэтому рисуется поверх каждой из них,
+        когда видима. Фокус на неё не переводится (см. п.8 в knowledge —
+        осознанное решение, чтобы не плодить лишнюю зону фокуса на Android TV).
+    -->
+    <LinearLayout
+        android:id="@+id/railPanel"
+        android:layout_width="88dp" android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:background="@drawable/panel_bg_left"
+        android:paddingLeft="10dp" android:paddingRight="10dp"
+        android:paddingTop="46dp" android:paddingBottom="16dp"
+        android:visibility="gone">
+
+        <ListView android:id="@+id/railListView"
+            android:layout_width="match_parent" android:layout_height="match_parent"
+            android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true"
+            android:divider="@null" android:dividerHeight="0dp"
+            android:scrollbars="none" />
     </LinearLayout>
 
     <!-- тост: строго по центру по горизонтали -->
