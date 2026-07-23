@@ -1,6 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+        state_focused — сам блок в фокусе (обычный случай);
+        state_selected — фокус на родителе (плейлист-строке верхнего блока),
+        а подсветка живёт на внутренней таблетке через isSelected = true.
+        Оба состояния дают одинаковую усиленную обводку.
+    -->
     <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <gradient android:startColor="#5745B8C7" android:endColor="#332E8B98" android:angle="315"/>
+            <stroke android:width="2dp" android:color="@color/focus_stroke"/>
+            <corners android:radius="14dp"/>
+        </shape>
+    </item>
+    <item android:state_selected="true">
         <shape android:shape="rectangle">
             <gradient android:startColor="#5745B8C7" android:endColor="#332E8B98" android:angle="315"/>
             <stroke android:width="2dp" android:color="@color/focus_stroke"/>

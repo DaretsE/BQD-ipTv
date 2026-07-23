@@ -581,14 +581,37 @@
         android:layout_gravity="left" android:orientation="vertical"
         android:background="@drawable/panel_bg_left"
         android:paddingLeft="16dp" android:paddingRight="16dp"
-        android:paddingTop="54dp" android:paddingBottom="20dp" android:visibility="gone">
+        android:paddingTop="30dp" android:paddingBottom="20dp" android:visibility="gone">
 
+        <!--
+            Верхний блок (Настройки / Поиск / Избранное) + строка-«таблетка»
+            выбора плейлиста — теперь ВНЕ списка, поэтому остаются неподвижными
+            при прокрутке категорий (см. left-menu-pro-mark.jpg). Скрывается
+            целиком в свёрнутой рейке (showRail()/expandMenu() в PlayerActivity).
+        -->
+        <LinearLayout
+            android:id="@+id/leftFixedTop"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <include layout="@layout/item_category" android:id="@+id/settingsRow" />
+            <include layout="@layout/item_category" android:id="@+id/searchRow" />
+            <include layout="@layout/item_category" android:id="@+id/favRow" />
+            <include layout="@layout/item_playlist_sel" android:id="@+id/plSelFixed" />
+        </LinearLayout>
+
+        <!-- Только категории каналов — прокручиваемая часть, со скроллбаром как в референсе -->
         <ListView android:id="@+id/catList"
             android:layout_width="match_parent" android:layout_height="match_parent"
             android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true"
             android:divider="@null" android:dividerHeight="0dp"
-            android:scrollbars="none"
-            android:paddingTop="8dp" android:paddingBottom="8dp"
+            android:scrollbars="vertical"
+            android:scrollbarStyle="outsideOverlay"
+            android:scrollbarSize="6dp"
+            android:scrollbarThumbVertical="@drawable/scrollbar_thumb"
+            android:scrollbarTrackVertical="@android:color/transparent"
+            android:fadeScrollbars="false"
+            android:paddingTop="6dp" android:paddingBottom="8dp" android:paddingRight="8dp"
             android:clipToPadding="false" />
     </LinearLayout>
 
