@@ -14,6 +14,7 @@ import android.os.Handler
 import android.os.Looper
 import android.text.InputType
 import android.view.KeyEvent
+import android.view.Gravity
 import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.EditText
@@ -42,7 +43,7 @@ import kotlin.random.Random
 
 class PlayerActivity : Activity() {
 
-    private enum class Panel { NONE, BROWSER, LEFT, RIGHT }
+    private enum class Panel { NONE, BROWSER, LEFT, RIGHT, SETTINGS }
 
     private lateinit var player: ExoPlayer
     private lateinit var playerView: PlayerView
@@ -134,6 +135,16 @@ class PlayerActivity : Activity() {
     /** Текущие пункты левого меню — нужны для прыжка на «Настройки». */
     private var catItemsList: List<CatItem> = emptyList()
 
+    private lateinit var toastView: TextView
+
+    // панель настроек
+    private lateinit var settingsPanel: View
+    private lateinit var setList: ListView
+    private lateinit var setDetail: LinearLayout
+    private lateinit var setDetailScroll: View
+    private var setDetailActive = false
+    private var setSelected = 0
+
     private var panel = Panel.NONE
     private var webServer: WebConfigServer? = null
     private var isPhone = false
@@ -147,6 +158,13 @@ class PlayerActivity : Activity() {
     private var isCatchupPlayback = false
     private var awaitingInstall = false
     private var browserChannels: List<Channel> = emptyList()
+
+    /** Фокус переведён на кнопку действия у выделенного канала (п.4 спецификации). */
+    private var browserActionFocused = false
+
+    // свёрнутая рейка рядом со списком каналов (только иконки категорий)
+    private lateinit var railPanel: View
+    private lateinit var railListView: ListView
     private var channelBeforeBrowse: Channel? = null
     private var modeSelection = "tv"
 
@@ -210,6 +228,17 @@ class PlayerActivity : Activity() {
         osdBtnNext = findViewById(R.id.osdBtnNext)
         osdBtnLast = findViewById(R.id.osdBtnLast)
         setupOsdButtons()
+        railPanel = findViewById(R.id.railPanel)
+        railListView = findViewById(R.id.railListView)
+        // рейка — визуальный указатель категории, фокус на неё не переводится
+        railListView.isFocusable = false
+        railListView.isFocusableInTouchMode = false
+        railListView.isEnabled = false
+        settingsPanel = findViewById(R.id.settingsPanel)
+        setList = findViewById(R.id.setList)
+        setDetail = findViewById(R.id.setDetail)
+        setDetailScroll = findViewById(R.id.setDetailScroll)
+        toastView = findViewById(R.id.toastView)
         favStar = findViewById(R.id.favStar)
         errorMsg = findViewById(R.id.errorMsg)
         browserOverlay = findViewById(R.id.browserOverlay)
@@ -850,18 +879,7 @@ class PlayerActivity : Activity() {
                 }
                 super.dispatchKeyEvent(event)
             }
-            Panel.BROWSER -> {
-                if (event.action == KeyEvent.ACTION_DOWN) when (event.keyCode) {
-                    // влево из списка каналов — к списку категорий
-                    KeyEvent.KEYCODE_DPAD_LEFT -> {
-                        handler.removeCallbacks(livePreviewRunnable)
-                        browserOverlay.visibility = View.GONE
-                        openLeftMenu(); return true
-                    }
-                    KeyEvent.KEYCODE_BACK -> { cancelBrowse(); return true }
-                }
-                super.dispatchKeyEvent(event)
-            }
+            Panel.BROWSER -> handleBrowserKey(event)
             Panel.RIGHT -> {
                 if (event.action == KeyEvent.ACTION_DOWN &&
                     (event.keyCode == KeyEvent.KEYCODE_BACK || event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT)) {
@@ -869,6 +887,7 @@ class PlayerActivity : Activity() {
                 }
                 super.dispatchKeyEvent(event)
             }
+            Panel.SETTINGS -> handleSettingsKey(event)
         }
     }
 
@@ -886,7 +905,7 @@ class PlayerActivity : Activity() {
                 // п.2: влево открывает тот список, откуда запущен канал
                 KeyEvent.KEYCODE_DPAD_LEFT -> { hideOsd(); openChannelBrowser(); return true }
                 KeyEvent.KEYCODE_DPAD_RIGHT -> { hideOsd(); openEpgPanel(); return true }
-                KeyEvent.KEYCODE_MENU -> { showSettingsDialog(); return true }
+                KeyEvent.KEYCODE_MENU -> { openSettingsPanel(); return true }
                 KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> { player.playWhenReady = !player.playWhenReady; return true }
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
                     // если фокус уже на кнопке плашки — обычное нажатие кнопки
@@ -952,6 +971,8 @@ class PlayerActivity : Activity() {
         browserOverlay.visibility = View.GONE
         leftMenu.visibility = View.GONE
         rightPanel.visibility = View.GONE
+        if (::settingsPanel.isInitialized) settingsPanel.visibility = View.GONE
+        setDetailActive = false
         panel = Panel.NONE
         if (isPhone && currentChannel != null) phoneBar.visibility = View.VISIBLE
     }
@@ -972,16 +993,130 @@ class PlayerActivity : Activity() {
         }
         browserListView.setOnItemSelectedListener(object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(p: android.widget.AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                (browserListView.adapter as? ChannelAdapter)?.selectedPos = pos
                 updatePreview(browserChannels.getOrNull(pos))
                 if (Store.livePreview) scheduleLivePreview(browserChannels.getOrNull(pos))
             }
             override fun onNothingSelected(p: android.widget.AdapterView<*>?) {}
         })
+        browserActionFocused = false
+        adapter.actionFocused = false
+        refreshRail()
         browserOverlay.visibility = View.VISIBLE
         browserListView.requestFocus()
         val start = browserChannels.indexOfFirst { it.url == currentChannel?.url }.coerceAtLeast(0)
+        adapter.selectedPos = start
         browserListView.setSelection(start)
         updatePreview(browserChannels.getOrNull(start))
+    }
+
+    /**
+     * Свёрнутая рейка слева от списка каналов: только иконки категорий,
+     * текущая подсвечена. Фокус на рейку не переводится — она показывает,
+     * где мы находимся; чтобы сменить категорию, нажимаем «влево» и
+     * попадаем в развёрнутое меню.
+     */
+    private fun refreshRail() {
+        val items = buildCatItems(curPlaylistIdx)
+        val adapter = CategoryAdapter(this, items, compact = true)
+        // подсвечиваем текущую категорию
+        val active = if (curCategory == null) items.indexOfFirst { it.type == "ALL" }
+        else items.indexOfFirst { it.type == "GROUP" && it.group == curCategory }
+        adapter.activePos = active
+        railListView.adapter = adapter
+        if (active >= 0) railListView.setSelection(active)
+    }
+
+    /**
+     * Клавиши в списке каналов (п.4 и п.5 спецификации).
+     * На канале: вправо — фокус на кнопку действия, OK — смотреть.
+     * На кнопке: вправо — смотреть, влево — назад на канал, OK — избранное.
+     */
+    private fun handleBrowserKey(event: KeyEvent): Boolean {
+        if (event.action != KeyEvent.ACTION_DOWN) return super.dispatchKeyEvent(event)
+        val adapter = browserListView.adapter as? ChannelAdapter
+        val pos = browserListView.selectedItemPosition
+
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                if (!browserActionFocused) {
+                    if (pos >= 0 && pos < browserChannels.size) {
+                        browserActionFocused = true
+                        adapter?.actionFocused = true
+                    }
+                } else {
+                    // с кнопки вправо — запуск просмотра
+                    if (pos >= 0 && pos < browserChannels.size) {
+                        zapIndex = pos
+                        play(browserChannels[pos])
+                        closePanels()
+                    }
+                }
+                return true
+            }
+            KeyEvent.KEYCODE_DPAD_LEFT -> {
+                if (browserActionFocused) {
+                    browserActionFocused = false
+                    adapter?.actionFocused = false
+                    return true
+                }
+                handler.removeCallbacks(livePreviewRunnable)
+                browserOverlay.visibility = View.GONE
+                openLeftMenu()
+                return true
+            }
+            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                if (browserActionFocused) {
+                    if (pos >= 0 && pos < browserChannels.size) toggleFavoriteAt(pos)
+                    return true
+                }
+            }
+            KeyEvent.KEYCODE_BACK -> {
+                if (browserActionFocused) {
+                    browserActionFocused = false
+                    adapter?.actionFocused = false
+                    return true
+                }
+                cancelBrowse()
+                return true
+            }
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
+                // при движении по списку фокус кнопки снимается
+                if (browserActionFocused) {
+                    browserActionFocused = false
+                    adapter?.actionFocused = false
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    /** Добавить/убрать канал из избранного прямо из списка. */
+    private fun toggleFavoriteAt(pos: Int) {
+        val ch = browserChannels.getOrNull(pos) ?: return
+        val added = Store.toggleFavorite(ch.url, ch.name)
+        toast(if (added) "Добавлено в Избранное" else "Удалено из Избранного")
+
+        if (curPlaylistIdx == -1) {
+            // в разделе «Избранное» удалённый канал исчезает из списка
+            rebuildZapList(keepCurrent = true)
+            browserChannels = zapList
+            val adapter = ChannelAdapter(this, browserChannels, showNow = true)
+            browserListView.adapter = adapter
+            if (browserChannels.isEmpty()) {
+                browserActionFocused = false
+                toast("В избранном пусто")
+                cancelBrowse()
+                return
+            }
+            val np = pos.coerceAtMost(browserChannels.size - 1)
+            adapter.selectedPos = np
+            adapter.actionFocused = browserActionFocused
+            browserListView.setSelection(np)
+            updatePreview(browserChannels.getOrNull(np))
+        } else {
+            (browserListView.adapter as? ChannelAdapter)?.notifyDataSetChanged()
+        }
     }
 
     private fun cancelBrowse() {
@@ -1056,17 +1191,15 @@ class PlayerActivity : Activity() {
         refreshLeftMenu()
     }
 
-    private fun refreshLeftMenu() {
-        val title = if (menuPlaylistIdx == -1) "Избранное" else playlists.getOrNull(menuPlaylistIdx)?.name ?: "—"
-        plSelector.text = "◀   $title   ▶"
-
+    /** Пункты меню категорий для указанного плейлиста (-1 — избранное). */
+    private fun buildCatItems(plIdx: Int): List<CatItem> {
         val items = ArrayList<CatItem>()
         items.add(CatItem("Настройки", 0, "SETTINGS"))   // иконка подставляется адаптером
         items.add(CatItem("Поиск передачи", 0, "SEARCH"))
-        if (menuPlaylistIdx == -1) {
+        if (plIdx == -1) {
             items.add(CatItem("Все избранные", favoriteChannels().size, "ALL"))
         } else {
-            val pl = playlists.getOrNull(menuPlaylistIdx)
+            val pl = playlists.getOrNull(plIdx)
             if (pl != null) {
                 items.add(CatItem("Все каналы", pl.channels.size, "ALL"))
                 val counts = LinkedHashMap<String, Int>()
@@ -1074,12 +1207,20 @@ class PlayerActivity : Activity() {
                 for ((g, n) in counts) items.add(CatItem(g, n, "GROUP", g))
             }
         }
+        return items
+    }
+
+    private fun refreshLeftMenu() {
+        val title = if (menuPlaylistIdx == -1) "Избранное" else playlists.getOrNull(menuPlaylistIdx)?.name ?: "—"
+        plSelector.text = "◀   $title   ▶"
+
+        val items = buildCatItems(menuPlaylistIdx)
         catItemsList = items
         catList.adapter = CategoryAdapter(this, items)
         catList.setOnItemClickListener { _, _, pos, _ ->
             val item = items[pos]
             when (item.type) {
-                "SETTINGS" -> showSettingsDialog()
+                "SETTINGS" -> openSettingsPanel()
                 "SEARCH" -> openSearch()
                 "ALL" -> { selectCategory(null) }
                 "GROUP" -> { selectCategory(item.group) }
@@ -1670,5 +1811,455 @@ class PlayerActivity : Activity() {
         pausedSince = if (!playerReleased && player.isPlaying) 0L else System.currentTimeMillis()
     }
 
-    private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+    // ------------------------------------------------------------ панель настроек
+
+    private val setItems = listOf(
+        SetItem("qr_code_2", "Настройка через смартфон", "qr"),
+        SetItem("playlist_add", "Плейлисты и ТВ-программа", "sources"),
+        SetItem("high_quality", "Качество трансляции", "quality"),
+        SetItem("info", "О программе", "about")
+    )
+
+    /** Короткая сводка раздела для правой колонки списка. */
+    private fun setValueFor(item: SetItem): String = when (item.kind) {
+        "sources" -> "плейлистов: ${Store.getPlaylistCfgs().size} • EPG: ${Store.getEpgSources().size}"
+        "quality" -> "${Quality.qualityLabel()} • буфер ${Store.bufferSec} сек"
+        "about" -> "версия ${UpdateManager.currentName(this)}"
+        else -> ""
+    }
+
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+    private fun openSettingsPanel() {
+        panel = Panel.SETTINGS
+        leftMenu.visibility = View.GONE
+        browserOverlay.visibility = View.GONE
+        rightPanel.visibility = View.GONE
+        phoneBar.visibility = View.GONE
+        setDetailActive = false
+        setList.isFocusable = true
+        settingsPanel.visibility = View.VISIBLE
+
+        val adapter = SettingsAdapter(this, setItems) { setValueFor(it) }
+        setList.adapter = adapter
+        setList.setOnItemClickListener { _, _, pos, _ -> enterSetDetail(pos) }
+        setList.setOnItemSelectedListener(object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(p: android.widget.AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                setSelected = pos
+                if (!setDetailActive) renderSetDetail(pos, active = false)
+            }
+            override fun onNothingSelected(p: android.widget.AdapterView<*>?) {}
+        })
+        setList.requestFocus()
+        setList.setSelection(setSelected.coerceIn(0, setItems.size - 1))
+        renderSetDetail(setSelected, active = false)
+    }
+
+    private fun closeSettingsPanel() {
+        settingsPanel.visibility = View.GONE
+        setDetailActive = false
+        if (::setList.isInitialized) setList.isFocusable = true
+        closePanels()
+    }
+
+    private fun refreshSetList() {
+        (setList.adapter as? SettingsAdapter)?.refresh()
+    }
+
+    private fun enterSetDetail(pos: Int) {
+        setSelected = pos
+        setDetailActive = true
+        renderSetDetail(pos, active = true)
+        // пока работаем в деталях, список не забирает фокус — навигация предсказуема
+        setList.isFocusable = false
+        if (!setDetail.requestFocus()) {
+            // в разделе нет управляемых элементов — остаёмся в списке
+            setList.isFocusable = true
+            setDetailActive = false
+            setList.requestFocus()
+            setList.setSelection(pos)
+        }
+    }
+
+    private fun leaveSetDetail() {
+        setDetailActive = false
+        renderSetDetail(setSelected, active = false)
+        setList.isFocusable = true
+        setList.requestFocus()
+        setList.setSelection(setSelected)
+    }
+
+    private fun renderSetDetail(pos: Int, active: Boolean) {
+        setDetail.removeAllViews()
+        val item = setItems.getOrNull(pos) ?: return
+        when (item.kind) {
+            "qr" -> buildQrDetail(active)
+            "sources" -> buildSourcesDetail(active)
+            "quality" -> buildQualityDetail(active)
+            "about" -> buildAboutDetail(active)
+        }
+    }
+
+    // ---------- строительные блоки деталей ----------
+
+    private fun addTitle(text: String) {
+        val tv = TextView(this)
+        tv.text = text
+        tv.setTextColor(0xFFFFFFFF.toInt())
+        tv.textSize = 24f
+        tv.setTypeface(tv.typeface, android.graphics.Typeface.BOLD)
+        tv.setPadding(0, 0, 0, dp(10))
+        setDetail.addView(tv)
+    }
+
+    private fun addDesc(text: String) {
+        val tv = TextView(this)
+        tv.text = text
+        tv.setTextColor(0xFFC6D7DD.toInt())
+        tv.textSize = 15f
+        tv.setPadding(0, 0, 0, dp(20))
+        setDetail.addView(tv)
+    }
+
+    private fun addHint(text: String) {
+        val tv = TextView(this)
+        tv.text = text
+        tv.setTextColor(0xFF8BA4AD.toInt())
+        tv.textSize = 13f
+        tv.setPadding(0, dp(4), 0, dp(14))
+        setDetail.addView(tv)
+    }
+
+    /** Кликабельная строка-кнопка на всю ширину. */
+    private fun addActionRow(label: String, enabled: Boolean = true, onClick: () -> Unit) {
+        val tv = TextView(this)
+        tv.text = label
+        tv.setTextColor(0xFFEEF6F8.toInt())
+        tv.textSize = 17f
+        tv.setBackgroundResource(R.drawable.setrow_bg)
+        tv.setPadding(dp(16), dp(14), dp(16), dp(14))
+        tv.isFocusable = enabled
+        tv.isClickable = enabled
+        tv.alpha = if (enabled) 1f else 0.45f
+        tv.setOnClickListener { onClick() }
+        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        lp.bottomMargin = dp(6)
+        setDetail.addView(tv, lp)
+    }
+
+    /**
+     * Ряд кнопок выбора («чипы») вместо переключателя.
+     * Текущее значение подсвечено, фокус ходит по кнопкам влево-вправо.
+     */
+    private fun addChipRow(label: String, options: List<String>, selectedIndex: Int, onSelect: (Int) -> Unit) {
+        val cap = TextView(this)
+        cap.text = label
+        cap.setTextColor(0xFF8BA4AD.toInt())
+        cap.textSize = 13f
+        cap.setPadding(dp(2), dp(10), 0, dp(6))
+        setDetail.addView(cap)
+
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        for ((i, opt) in options.withIndex()) {
+            val chip = TextView(this)
+            chip.text = opt
+            chip.setTextColor(0xFFEEF6F8.toInt())
+            chip.textSize = 15f
+            chip.setBackgroundResource(R.drawable.chip_bg)
+            chip.isFocusable = true
+            chip.isClickable = true
+            chip.isSelected = (i == selectedIndex)
+            chip.setOnClickListener {
+                // выделение переключаем на месте, чтобы фокус не прыгал наверх
+                for (j in 0 until row.childCount) row.getChildAt(j).isSelected = (j == i)
+                onSelect(i)
+            }
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            lp.rightMargin = dp(8)
+            row.addView(chip, lp)
+        }
+        val rlp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        rlp.bottomMargin = dp(6)
+        setDetail.addView(row, rlp)
+    }
+
+    // ---------- разделы ----------
+
+    private fun buildQrDetail(active: Boolean) {
+        addTitle("Настройка через смартфон")
+        addDesc("Отсканируйте QR-код телефоном или откройте адрес в браузере. " +
+            "Телефон и ТВ должны быть в одной Wi-Fi сети. На странице настройки " +
+            "добавьте плейлист M3U — эфир запустится сам.")
+
+        val url = "http://${IpUtil.localIp()}:${WebConfigServer.PORT}"
+
+        // QR по центру и крупнее
+        val img = ImageView(this)
+        try {
+            val size = 480
+            val matrix = QRCodeWriter().encode(url, BarcodeFormat.QR_CODE, size, size)
+            val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.RGB_565)
+            for (x in 0 until size) for (y in 0 until size)
+                bmp.setPixel(x, y, if (matrix.get(x, y)) Color.BLACK else Color.WHITE)
+            img.setImageBitmap(bmp)
+        } catch (_: Exception) { }
+        img.setBackgroundColor(0xFFFFFFFF.toInt())
+        img.setPadding(dp(10), dp(10), dp(10), dp(10))
+        val ilp = LinearLayout.LayoutParams(dp(280), dp(280))
+        ilp.gravity = Gravity.CENTER_HORIZONTAL
+        setDetail.addView(img, ilp)
+
+        // адрес по центру под QR
+        val tv = TextView(this)
+        tv.text = url
+        tv.setTextColor(0xFF63D4E2.toInt())
+        tv.textSize = 26f
+        tv.gravity = Gravity.CENTER
+        tv.setTypeface(tv.typeface, android.graphics.Typeface.BOLD)
+        val tlp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        tlp.topMargin = dp(16)
+        tlp.bottomMargin = dp(10)
+        setDetail.addView(tv, tlp)
+
+        addActionRow("Ввести ссылку на плейлист вручную") { showManualUrlDialog(fromPhoneSetup = false) }
+    }
+
+    private fun buildSourcesDetail(active: Boolean) {
+        addTitle("Плейлисты и ТВ-программа")
+        addDesc("Добавляйте и удаляйте плейлисты (M3U / M3U8) и источники телепрограммы " +
+            "(EPG, XMLTV). Телепрограмма подтягивается к каналам автоматически по их именам.")
+
+        val cfgs = Store.getPlaylistCfgs()
+        addHint(if (cfgs.isEmpty()) "Плейлистов пока нет" else "Плейлисты (${cfgs.size})")
+        for (cfg in cfgs) {
+            addActionRow("${cfg.name}   —   изменить или удалить") { playlistActions(cfg.name, cfg.url) }
+        }
+
+        val srcs = Store.getEpgSources()
+        addHint(if (srcs.isEmpty()) "Источников EPG пока нет" else "Источники EPG (${srcs.size})")
+        for (src in srcs) {
+            addActionRow("${src.name}   —   изменить или удалить") { epgActions(src.name, src.url) }
+        }
+
+        addHint("Действия")
+        addActionRow("Добавить плейлист (ввести ссылку)") { showManualUrlDialog(fromPhoneSetup = false) }
+        addActionRow("Добавить источник EPG") { showManualEpgDialog(fromPhoneSetup = false) }
+        addActionRow("Обновить все источники") {
+            toast("Обновляю плейлисты и телепрограмму…")
+            forceRefreshPlaylists()
+            forceRefreshEpg()
+        }
+    }
+
+    private fun playlistActions(name: String, url: String) {
+        AlertDialog.Builder(this).setTitle(name)
+            .setItems(arrayOf("Переименовать", "Удалить")) { _, act ->
+                if (act == 0) {
+                    val inp = EditText(this); inp.setText(name)
+                    AlertDialog.Builder(this).setTitle("Новое название").setView(inp)
+                        .setPositiveButton("OK") { _, _ ->
+                            Store.renamePlaylist(url, inp.text.toString().trim())
+                            reloadFromStore(false); refreshSetList(); renderSetDetail(setSelected, true)
+                        }
+                        .setNegativeButton("Отмена", null).show()
+                } else {
+                    Store.removePlaylist(url)
+                    currentChannel = null
+                    reloadFromStore(false)
+                    refreshSetList(); renderSetDetail(setSelected, true)
+                    toast("Плейлист удалён")
+                }
+            }.show()
+    }
+
+    private fun epgActions(name: String, url: String) {
+        AlertDialog.Builder(this).setTitle(name)
+            .setItems(arrayOf("Переименовать", "Удалить")) { _, act ->
+                if (act == 0) {
+                    val inp = EditText(this); inp.setText(name)
+                    AlertDialog.Builder(this).setTitle("Новое название").setView(inp)
+                        .setPositiveButton("OK") { _, _ ->
+                            Store.renameEpgSource(url, inp.text.toString().trim())
+                            refreshSetList(); renderSetDetail(setSelected, true)
+                        }
+                        .setNegativeButton("Отмена", null).show()
+                } else {
+                    Store.removeEpgSource(url)
+                    forceRefreshEpg()
+                    refreshSetList(); renderSetDetail(setSelected, true)
+                    toast("Источник EPG удалён")
+                }
+            }.show()
+    }
+
+    private fun buildQualityDetail(active: Boolean) {
+        addTitle("Качество трансляции")
+        addDesc("Параметры воспроизведения. При слабом интернете сильнее всего помогают " +
+            "«задержка от эфира» и упорное переподключение при обрыве.")
+
+        val qVals = listOf("auto", "stable", "max")
+        addChipRow("Потолок качества", listOf("Авто", "Стабильность", "Максимум"),
+            qVals.indexOf(Store.quality).coerceAtLeast(0)) { i ->
+            Store.quality = qVals[i]
+            applyQuality()   // применяется на лету, без перезапуска канала
+            refreshSetList()
+            toast("Качество: ${Quality.qualityLabel()}")
+        }
+
+        val bufVals = listOf(5, 10, 15, 30, 60)
+        addChipRow("Размер буфера", bufVals.map { "$it сек" },
+            bufVals.indexOf(Store.bufferSec).coerceAtLeast(0)) { i ->
+            Store.bufferSec = bufVals[i]
+            rebuildPlayerKeepingChannel()
+            refreshSetList()
+            toast("Буфер: ${bufVals[i]} сек")
+        }
+
+        val offVals = listOf(0, 10, 20, 30, 60)
+        addChipRow("Задержка от эфира", listOf("Как в потоке", "10 сек", "20 сек", "30 сек", "60 сек"),
+            offVals.indexOf(Store.liveOffsetSec).coerceAtLeast(0)) { i ->
+            Store.liveOffsetSec = offVals[i]
+            rebuildPlayerKeepingChannel()
+            toast("Задержка от эфира: ${Quality.liveOffsetLabel()}")
+        }
+
+        val retryVals = listOf("fast", "normal", "persistent")
+        addChipRow("При обрыве связи", listOf("Быстро сдаваться", "Обычно", "Упорно"),
+            retryVals.indexOf(Store.retryMode).coerceAtLeast(0)) { i ->
+            Store.retryMode = retryVals[i]
+            rebuildPlayerKeepingChannel()
+            toast("При обрыве: ${Quality.retryLabel()}")
+        }
+
+        val decVals = listOf("hw", "sw")
+        addChipRow("Тип декодера", listOf("Аппаратный (HW)", "Программный (SW)"),
+            decVals.indexOf(Store.decoder).coerceAtLeast(0)) { i ->
+            Store.decoder = decVals[i]
+            rebuildPlayerKeepingChannel()
+            toast("Декодер: ${Quality.decoderLabel()}")
+        }
+
+        addChipRow("Автофреймрейт", listOf("Выключен", "Включён"),
+            if (Store.afr) 1 else 0) { i ->
+            Store.afr = (i == 1)
+            if (!Store.afr) Quality.resetFrameRate(this) else applyAutoFrameRate()
+            toast("Автофреймрейт: ${if (Store.afr) "вкл" else "выкл"}")
+        }
+
+        addHint("Программный декодер медленнее, но устойчивее, если картинка сыпется. " +
+            "Автофреймрейт убирает рывки, но на секунду гасит экран при переключении.")
+    }
+
+    private fun buildAboutDetail(active: Boolean) {
+        addTitle("О программе")
+
+        // блок версии — по центру и по ширине текста
+        val box = TextView(this)
+        box.text = "BQDiptv\nверсия ${UpdateManager.currentName(this)}"
+        box.setTextColor(0xFFEEF6F8.toInt())
+        box.textSize = 20f
+        box.gravity = Gravity.CENTER
+        box.setBackgroundResource(R.drawable.version_box)
+        box.setPadding(dp(28), dp(18), dp(28), dp(18))
+        val blp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        blp.gravity = Gravity.CENTER_HORIZONTAL
+        blp.bottomMargin = dp(22)
+        setDetail.addView(box, blp)
+
+        // две кнопки в один ряд, по ширине содержимого
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+
+        val btnUpd = TextView(this)
+        btnUpd.text = "Проверить обновление"
+        btnUpd.setTextColor(0xFFEEF6F8.toInt())
+        btnUpd.textSize = 16f
+        btnUpd.gravity = Gravity.CENTER
+        btnUpd.setBackgroundResource(R.drawable.btn_update)
+        btnUpd.setPadding(dp(22), dp(14), dp(22), dp(14))
+        btnUpd.isFocusable = true
+        btnUpd.isClickable = true
+        btnUpd.setOnClickListener { checkUpdates(silent = false) }
+        val ulp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        ulp.rightMargin = dp(12)
+        row.addView(btnUpd, ulp)
+
+        val btnBack = TextView(this)
+        btnBack.text = "Откат на версию"
+        btnBack.setTextColor(0xFFEEF6F8.toInt())
+        btnBack.textSize = 16f
+        btnBack.gravity = Gravity.CENTER
+        btnBack.setBackgroundResource(R.drawable.btn_rollback)
+        btnBack.setPadding(dp(22), dp(14), dp(22), dp(14))
+        btnBack.isFocusable = true
+        btnBack.isClickable = true
+        btnBack.setOnClickListener { rollbackVersion() }
+        row.addView(btnBack, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+        val rlp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        rlp.gravity = Gravity.CENTER_HORIZONTAL
+        setDetail.addView(row, rlp)
+
+        addHint("Обновление скачивается из релизов проекта на GitHub. " +
+            "Откат ставит предыдущую версию, настройки при этом сохраняются.")
+    }
+
+    /** Находится ли view внутри правой колонки деталей. */
+    private fun isInSetDetail(v: View?): Boolean {
+        var p: View? = v
+        while (p != null) {
+            if (p === setDetail) return true
+            p = p.parent as? View
+        }
+        return false
+    }
+
+    /** Обработка клавиш в панели настроек. Навигация НЕ зацикливается. */
+    private fun handleSettingsKey(event: KeyEvent): Boolean {
+        if (event.action != KeyEvent.ACTION_DOWN) return super.dispatchKeyEvent(event)
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_BACK -> {
+                if (setDetailActive) leaveSetDetail() else closeSettingsPanel()
+                return true
+            }
+            KeyEvent.KEYCODE_DPAD_LEFT -> {
+                if (!setDetailActive) { closeSettingsPanel(); return true }
+                // из деталей влево уходим в список только с самого левого элемента,
+                // иначе влево ходим по чипам
+                val f = currentFocus
+                val left = f?.focusSearch(View.FOCUS_LEFT)
+                // если слева ничего нет ИЛИ это уже вне деталей — возвращаемся в список
+                if (f == null || left == null || !isInSetDetail(left)) { leaveSetDetail(); return true }
+                return super.dispatchKeyEvent(event)
+            }
+            KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                if (!setDetailActive) { enterSetDetail(setList.selectedItemPosition.coerceAtLeast(0)); return true }
+                return super.dispatchKeyEvent(event)
+            }
+            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                if (!setDetailActive) { enterSetDetail(setList.selectedItemPosition.coerceAtLeast(0)); return true }
+                return super.dispatchKeyEvent(event)
+            }
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    // ------------------------------------------------------------ уведомления
+
+    private val hideToastRunnable = Runnable { toastView.visibility = View.GONE }
+
+    /** Тост строго по центру по горизонтали (позиция задана в разметке). */
+    private fun toast(msg: String) {
+        // страховка: если сообщение пришло до того, как разметка создана
+        if (!::toastView.isInitialized) {
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+            return
+        }
+        toastView.text = msg
+        toastView.visibility = View.VISIBLE
+        handler.removeCallbacks(hideToastRunnable)
+        handler.postDelayed(hideToastRunnable, 2200)
+    }
 }
