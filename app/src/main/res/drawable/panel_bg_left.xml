@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Левая панель: скругление только справа, как в макете. -->
+<!--
+    Панель левого меню и списка каналов — «плавающая пилюля» из прототипа
+    (border-radius:22px). Раньше скругление было только справа, из-за чего
+    в свёрнутом виде рейка и список каналов сливались с фоном без визуального
+    разделения. Теперь панель со всех сторон скруглена и стоит с отступами
+    от краёв сцены (marginTop/marginBottom/marginStart — в activity_player).
+-->
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
     <solid android:color="@color/panel"/>
-    <corners android:topRightRadius="24dp" android:bottomRightRadius="24dp"/>
+    <corners android:radius="22dp"/>
 </shape>

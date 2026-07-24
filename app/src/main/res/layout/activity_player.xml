@@ -13,6 +13,20 @@
         app:use_controller="false"
         app:surface_type="surface_view" />
 
+    <!--
+        Единый затемнитель фона над видео. Включается, пока открыта ЛЮБАЯ
+        панель (левое меню / список каналов / EPG / поиск / настройки).
+        Раньше затемнение было прибито к каждой панели отдельно, из-за чего
+        при переходе меню→каналы фон менялся с прозрачного на тёмный —
+        было видно мигание. Управляется updateStageDim() в PlayerActivity.
+    -->
+    <View
+        android:id="@+id/stageDim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/overlay_soft"
+        android:visibility="gone" />
+
     <LinearLayout
         android:id="@+id/osdPanel"
         android:layout_width="match_parent"
@@ -163,14 +177,16 @@
     <FrameLayout
         android:id="@+id/browserOverlay"
         android:layout_width="match_parent" android:layout_height="match_parent"
-        android:background="@color/overlay_soft" android:visibility="gone">
+        android:visibility="gone">
 
         <LinearLayout
             android:id="@+id/browserList"
             android:layout_width="540dp" android:layout_height="match_parent"
-            android:layout_marginLeft="88dp"
+            android:layout_marginLeft="114dp"
+            android:layout_marginTop="14dp"
+            android:layout_marginBottom="14dp"
             android:orientation="vertical" android:background="@drawable/panel_bg_left"
-            android:paddingLeft="44dp" android:paddingRight="16dp"
+            android:paddingLeft="24dp" android:paddingRight="16dp"
             android:paddingTop="54dp" android:paddingBottom="18dp">
 
             <!-- имя плейлиста: мелкое, в верхнем регистре, с разрядкой -->
@@ -197,15 +213,20 @@
                 android:layout_width="match_parent" android:layout_height="match_parent"
                 android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true"
                 android:divider="@null" android:dividerHeight="0dp"
-                android:scrollbars="none"
+                android:scrollbars="vertical"
+                android:scrollbarStyle="outsideOverlay"
+                android:scrollbarSize="6dp"
+                android:scrollbarThumbVertical="@drawable/scrollbar_thumb"
+                android:fadeScrollbars="false"
                 android:paddingTop="6dp" android:paddingBottom="6dp"
+                android:paddingRight="8dp"
                 android:clipToPadding="false" />
         </LinearLayout>
 
         <LinearLayout
             android:id="@+id/previewCard"
             android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_gravity="bottom" android:layout_marginLeft="628dp"
+            android:layout_gravity="bottom" android:layout_marginLeft="654dp"
             android:orientation="vertical" android:background="@drawable/osd_bg"
             android:paddingLeft="32dp" android:paddingRight="32dp"
             android:paddingTop="44dp" android:paddingBottom="26dp">
@@ -509,16 +530,17 @@
     <FrameLayout
         android:id="@+id/settingsPanel"
         android:layout_width="match_parent" android:layout_height="match_parent"
-        android:background="@color/overlay_soft"
         android:visibility="gone">
 
         <LinearLayout
             android:id="@+id/setListPanel"
             android:layout_width="400dp" android:layout_height="match_parent"
-            android:layout_marginLeft="88dp"
+            android:layout_marginLeft="114dp"
+            android:layout_marginTop="14dp"
+            android:layout_marginBottom="14dp"
             android:orientation="vertical"
             android:background="@drawable/panel_bg_left"
-            android:paddingLeft="30dp" android:paddingRight="16dp"
+            android:paddingLeft="24dp" android:paddingRight="16dp"
             android:paddingTop="54dp" android:paddingBottom="16dp">
 
             <TextView android:id="@+id/setListVersion"
@@ -546,15 +568,20 @@
                 android:listSelector="@drawable/list_focus"
                 android:drawSelectorOnTop="true"
                 android:divider="@null" android:dividerHeight="0dp"
-                android:scrollbars="none"
+                android:scrollbars="vertical"
+                android:scrollbarStyle="outsideOverlay"
+                android:scrollbarSize="6dp"
+                android:scrollbarThumbVertical="@drawable/scrollbar_thumb"
+                android:fadeScrollbars="false"
                 android:paddingTop="6dp" android:paddingBottom="6dp"
+                android:paddingRight="8dp"
                 android:clipToPadding="false" />
         </LinearLayout>
 
         <ScrollView
             android:id="@+id/setDetailScroll"
             android:layout_width="match_parent" android:layout_height="match_parent"
-            android:layout_marginLeft="488dp"
+            android:layout_marginLeft="514dp"
             android:background="@color/panel"
             android:paddingLeft="34dp" android:paddingRight="34dp"
             android:paddingTop="52dp" android:paddingBottom="36dp"
@@ -574,33 +601,25 @@
         вверх-вниз становится линейной по всему меню, ровно как в catItems().
         Разделителей между строками в прототипе нет — линия рисуется только
         под верхним блоком, её рисует сам адаптер в строке PLSEL.
+
+        Панель — «плавающая пилюля»: layout_marginTop/marginBottom/marginStart
+        задают отступ от краёв сцены, background=@drawable/panel_bg_left скруглён
+        со всех сторон. Между развёрнутым (392dp) и свёрнутым (88dp) состоянием
+        меняется ТОЛЬКО ширина и внутренний padding — top/bottom/marginStart/
+        border-radius одинаковые. Из-за этого иконки Настройки/Поиск/Избранное
+        остаются на своих Y-координатах и не прыгают при сворачивании/разворачивании.
     -->
     <LinearLayout
         android:id="@+id/leftMenu"
         android:layout_width="392dp" android:layout_height="match_parent"
         android:layout_gravity="left" android:orientation="vertical"
+        android:layout_marginStart="8dp"
+        android:layout_marginTop="14dp"
+        android:layout_marginBottom="14dp"
         android:background="@drawable/panel_bg_left"
         android:paddingLeft="16dp" android:paddingRight="16dp"
-        android:paddingTop="30dp" android:paddingBottom="20dp" android:visibility="gone">
+        android:paddingTop="20dp" android:paddingBottom="16dp" android:visibility="gone">
 
-        <!--
-            Верхний блок (Настройки / Поиск / Избранное) + строка-«таблетка»
-            выбора плейлиста — теперь ВНЕ списка, поэтому остаются неподвижными
-            при прокрутке категорий (см. left-menu-pro-mark.jpg). Скрывается
-            целиком в свёрнутой рейке (showRail()/expandMenu() в PlayerActivity).
-        -->
-        <LinearLayout
-            android:id="@+id/leftFixedTop"
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="vertical">
-
-            <include layout="@layout/item_category" android:id="@+id/settingsRow" />
-            <include layout="@layout/item_category" android:id="@+id/searchRow" />
-            <include layout="@layout/item_category" android:id="@+id/favRow" />
-            <include layout="@layout/item_playlist_sel" android:id="@+id/plSelFixed" />
-        </LinearLayout>
-
-        <!-- Только категории каналов — прокручиваемая часть, со скроллбаром как в референсе -->
         <ListView android:id="@+id/catList"
             android:layout_width="match_parent" android:layout_height="match_parent"
             android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true"
@@ -609,9 +628,9 @@
             android:scrollbarStyle="outsideOverlay"
             android:scrollbarSize="6dp"
             android:scrollbarThumbVertical="@drawable/scrollbar_thumb"
-            android:scrollbarTrackVertical="@android:color/transparent"
             android:fadeScrollbars="false"
-            android:paddingTop="6dp" android:paddingBottom="8dp" android:paddingRight="8dp"
+            android:paddingTop="8dp" android:paddingBottom="8dp"
+            android:paddingRight="4dp"
             android:clipToPadding="false" />
     </LinearLayout>
 

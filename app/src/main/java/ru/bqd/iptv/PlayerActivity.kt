@@ -83,16 +83,6 @@ class PlayerActivity : Activity() {
 
     private lateinit var leftMenu: View
     private lateinit var catList: ListView
-    /** Верхний неподвижный блок левого меню (Настройки/Поиск/Избранное + селектор плейлиста). */
-    private lateinit var leftFixedTop: View
-    private lateinit var settingsRow: View
-    private lateinit var searchRow: View
-    private lateinit var favRow: View
-    private lateinit var favRowCount: TextView
-    private lateinit var plSelFixed: View
-    private lateinit var plSelFixedName: TextView
-    /** Категории (без служебных пунктов) — то, что реально лежит в прокручиваемом catList. */
-    private var catOnlyList: List<CatItem> = emptyList()
 
     private lateinit var rightPanel: View
     private lateinit var epgHeader: TextView
@@ -160,6 +150,15 @@ class PlayerActivity : Activity() {
     private lateinit var setDetailScroll: android.widget.ScrollView
     private var setDetailActive = false
     private var setSelected = 0
+
+    /**
+     * Общий затемнитель фона над видео. Один на все панели: пока открыто
+     * левое меню / список каналов / EPG / поиск / настройки — виден и не меняет
+     * яркости. Раньше затемнение было прибито к каждому оверлею отдельно,
+     * и при переключении меню→каналы фон менялся с прозрачного на тёмный,
+     * что читалось как мигание. Управляется updateStageDim().
+     */
+    private lateinit var stageDim: View
 
     private var panel = Panel.NONE
     private var webServer: WebConfigServer? = null
@@ -253,6 +252,7 @@ class PlayerActivity : Activity() {
         osdBtnLast = findViewById(R.id.osdBtnLast)
         setupOsdButtons()
         // рейка — визуальный указатель категории, фокус на неё не переводится
+        stageDim = findViewById(R.id.stageDim)
         settingsPanel = findViewById(R.id.settingsPanel)
         setListPanel = findViewById(R.id.setListPanel)
         setListVersion = findViewById(R.id.setListVersion)
@@ -276,14 +276,6 @@ class PlayerActivity : Activity() {
         prevNext = findViewById(R.id.prevNext)
         leftMenu = findViewById(R.id.leftMenu)
         catList = findViewById(R.id.catList)
-        leftFixedTop = findViewById(R.id.leftFixedTop)
-        settingsRow = findViewById(R.id.settingsRow)
-        searchRow = findViewById(R.id.searchRow)
-        favRow = findViewById(R.id.favRow)
-        favRowCount = favRow.findViewById(R.id.catCount)
-        plSelFixed = findViewById(R.id.plSelFixed)
-        plSelFixedName = findViewById(R.id.plSelName)
-        setupLeftFixedRows()
         rightPanel = findViewById(R.id.rightPanel)
         epgHeader = findViewById(R.id.epgHeader)
         nowTitle = findViewById(R.id.nowTitle)
@@ -313,18 +305,33 @@ class PlayerActivity : Activity() {
     }
 
     /**
-     * Размеры панелей — из прототипа: меню 392, список каналов 540, рейка 88,
-     * правая панель 520. На узких экранах ужимаем, чтобы ничего не уезжало за край.
-     * Карточка предпросмотра сдвигается на ширину рейки + ширину списка.
+     * Размеры и позиции панелей.
+     *
+     * В обновлённом прототипе все панели — «плавающие пилюли» с отступами
+     * от краёв сцены:
+     *   • рейка (свёрнутое leftMenu): marginStart=8dp, ширина 88dp,
+     *     правый край в x = 8 + 88 = 96dp
+     *   • зазор между рейкой и следующей панелью: 18dp
+     *   • список каналов / список настроек: marginLeft = 96 + 18 = 114dp
+     *   • карточка предпросмотра / детали настроек: сразу за списком.
+     *
+     * На узких экранах ужимаем, чтобы ничего не уезжало за край.
      */
     private fun clampPanels() {
         val w = resources.displayMetrics.widthPixels
         fun dpx(v: Int) = (v * resources.displayMetrics.density).toInt()
         val railW = dpx(88)
+        val railMarginStart = dpx(8)
+        val railGap = dpx(18)
+        val panelLeftMargin = railMarginStart + railW + railGap   // = 114dp в px
         val listW = minOf(dpx(540), (w * 0.62).toInt()).coerceAtLeast(dpx(240))
-        browserList.layoutParams = browserList.layoutParams.apply { width = listW }
+        (browserList.layoutParams as? FrameLayout.LayoutParams)?.let {
+            it.width = listW
+            it.leftMargin = panelLeftMargin
+            browserList.layoutParams = it
+        }
         (previewCard.layoutParams as? FrameLayout.LayoutParams)?.let {
-            it.leftMargin = railW + listW
+            it.leftMargin = panelLeftMargin + listW
             previewCard.layoutParams = it
         }
         if (!menuCollapsed) {
@@ -336,12 +343,12 @@ class PlayerActivity : Activity() {
 
         val setListW = minOf(dpx(400), (w * 0.55).toInt()).coerceAtLeast(dpx(260))
         (setListPanel.layoutParams as? FrameLayout.LayoutParams)?.let {
-            it.leftMargin = railW
+            it.leftMargin = panelLeftMargin
             it.width = setListW
             setListPanel.layoutParams = it
         }
         (setDetailScroll.layoutParams as? FrameLayout.LayoutParams)?.let {
-            it.leftMargin = railW + setListW
+            it.leftMargin = panelLeftMargin + setListW
             setDetailScroll.layoutParams = it
         }
     }
@@ -917,21 +924,22 @@ class PlayerActivity : Activity() {
         return when (panel) {
             Panel.NONE -> handleFullscreenKey(event)
             Panel.LEFT -> {
-                // Верхний неподвижный блок (Настройки/Поиск/Избранное + плейлист)
-                // обрабатывает свои клавиши сам через setOnKeyListener в setupLeftFixedRows,
-                // здесь остаётся только логика для catList (категории каналов) и общее.
-                val focus = currentFocus
-                val onCatList = focus === catList || focus?.parent === catList
                 if (event.action == KeyEvent.ACTION_DOWN) {
+                    val pos = catList.selectedItemPosition
+                    val type = catItemsList.getOrNull(pos)?.type
                     when (event.keyCode) {
+                        // ←/→ листают плейлист ТОЛЬКО когда выделена строка-селектор (как в прототипе),
+                        // на остальных пунктах ← закрывает меню, → открывает пункт
                         KeyEvent.KEYCODE_DPAD_LEFT -> {
-                            if (onCatList) { closePanels(); return true }
+                            if (type == "PLSEL") cycleMenuPlaylist(-1) else closePanels()
+                            return true
                         }
-                        KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
-                            if (onCatList) {
-                                val pos = catList.selectedItemPosition
-                                if (pos >= 0) { activateCatOnly(pos); return true }
-                            }
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                            if (type == "PLSEL") cycleMenuPlaylist(1) else activateCat(pos)
+                            return true
+                        }
+                        KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                            activateCat(pos); return true
                         }
                         KeyEvent.KEYCODE_BACK -> { closePanels(); return true }
                         // п.3: удержание «Вверх» ~1 сек — прыжок на пункт «Настройки»
@@ -1026,8 +1034,9 @@ class PlayerActivity : Activity() {
     /** Прыжок к «Настройкам» из любого места списка категорий. */
     private val upHoldRunnable = Runnable {
         upHeldFired = true
-        if (panel == Panel.LEFT && !menuCollapsed) {
-            settingsRow.requestFocus()
+        if (panel == Panel.LEFT) {
+            val idx = catItemsList.indexOfFirst { it.type == "SETTINGS" }
+            if (idx >= 0) { catList.requestFocus(); catList.setSelection(idx) }
         }
     }
 
@@ -1035,6 +1044,22 @@ class PlayerActivity : Activity() {
     private val longPressRunnable = Runnable { longPressFired = true; gotoPrevChannel() }
 
     // ------------------------------------------------------------ панели
+
+    /**
+     * Показывает/прячет общий затемнитель фона в зависимости от того,
+     * открыта ли хоть одна панель. Вызывается из всех точек, которые
+     * меняют видимость панелей.
+     */
+    private fun updateStageDim() {
+        if (!::stageDim.isInitialized) return
+        val anyPanelOpen =
+            (::leftMenu.isInitialized && leftMenu.visibility == View.VISIBLE) ||
+            (::browserOverlay.isInitialized && browserOverlay.visibility == View.VISIBLE) ||
+            (::rightPanel.isInitialized && rightPanel.visibility == View.VISIBLE) ||
+            (::searchOverlay.isInitialized && searchOverlay.visibility == View.VISIBLE) ||
+            (::settingsPanel.isInitialized && settingsPanel.visibility == View.VISIBLE)
+        stageDim.visibility = if (anyPanelOpen) View.VISIBLE else View.GONE
+    }
 
     private fun closePanels() {
         browserOverlay.visibility = View.GONE
@@ -1044,6 +1069,7 @@ class PlayerActivity : Activity() {
         if (::leftMenu.isInitialized) leftMenu.visibility = View.GONE
         setDetailActive = false
         panel = Panel.NONE
+        updateStageDim()
         if (isPhone && currentChannel != null) phoneBar.visibility = View.VISIBLE
     }
 
@@ -1058,13 +1084,13 @@ class PlayerActivity : Activity() {
         val wasVisible = leftMenu.visibility == View.VISIBLE
         leftMenu.visibility = View.VISIBLE
         menuCollapsed = true
-        // в рейке верхний неподвижный блок не показывается — там только полоска иконок
-        if (::leftFixedTop.isInitialized) leftFixedTop.visibility = View.GONE
         refreshRail(activeOverrideType)
         // фокус рейка не забирает — это индикатор, а не зона навигации
         catList.isFocusable = false
         catList.isFocusableInTouchMode = false
         catList.isEnabled = false
+        // в свёрнутой рейке скроллбар не нужен (правка из прототипа)
+        catList.isVerticalScrollBarEnabled = false
         if (wasVisible) {
             // меню уже на экране (открыли раздел из него) — плавно схлопываем
             animateMenuWidth(dp(MENU_W_RAIL), dp(MENU_PAD_RAIL))
@@ -1072,15 +1098,16 @@ class PlayerActivity : Activity() {
             setMenuWidth(dp(MENU_W_RAIL), dp(MENU_PAD_RAIL))
             animPanelInLeft(leftMenu)
         }
+        updateStageDim()
     }
 
     /** Развернуть меню обратно в полный вид. */
     private fun expandMenu(animate: Boolean) {
         menuCollapsed = false
-        if (::leftFixedTop.isInitialized) leftFixedTop.visibility = View.VISIBLE
         catList.isFocusable = true
         catList.isFocusableInTouchMode = true
         catList.isEnabled = true
+        catList.isVerticalScrollBarEnabled = true
         if (animate) animateMenuWidth(dp(MENU_W_FULL), dp(MENU_PAD_FULL))
         else setMenuWidth(dp(MENU_W_FULL), dp(MENU_PAD_FULL))
     }
@@ -1347,21 +1374,15 @@ class PlayerActivity : Activity() {
         // если меню уже висело рейкой — плавно разворачиваем, иначе въезжаем слева
         expandMenu(animate = wasCollapsed)
         if (!wasCollapsed) animPanelInLeft(leftMenu)
-        // Фокус — на текущем разделе. Верхний блок теперь неподвижен, поэтому
-        // Избранное фокусируется прямо на favRow, а категории — в catList.
-        when {
-            curPlaylistIdx == -1 -> favRow.requestFocus()
-            curCategory == null -> {
-                catList.requestFocus()
-                val idx = catOnlyList.indexOfFirst { it.type == "ALL" }
-                if (idx >= 0) catList.setSelection(idx)
-            }
-            else -> {
-                catList.requestFocus()
-                val idx = catOnlyList.indexOfFirst { it.type == "GROUP" && it.group == curCategory }
-                if (idx >= 0) catList.setSelection(idx)
-            }
+        catList.requestFocus()
+        // выделение — на текущем разделе, а не всегда на первой строке
+        val sel = when {
+            curPlaylistIdx == -1 -> catItemsList.indexOfFirst { it.type == "FAV" }
+            curCategory == null -> catItemsList.indexOfFirst { it.type == "ALL" }
+            else -> catItemsList.indexOfFirst { it.type == "GROUP" && it.group == curCategory }
         }
+        if (sel >= 0) catList.setSelection(sel)
+        updateStageDim()
     }
 
     private fun cycleMenuPlaylist(dir: Int) {
@@ -1370,11 +1391,7 @@ class PlayerActivity : Activity() {
         menuPlaylistIdx += dir
         if (menuPlaylistIdx < 0) menuPlaylistIdx = max
         if (menuPlaylistIdx > max) menuPlaylistIdx = 0
-        // Обновляем содержимое: имя плейлиста в таблетке + список категорий.
-        // Явно НЕ трогаем фокус — иначе после ←/→ на плейлисте курсор бы
-        // прыгал в catList и приходилось бы возвращаться стрелкой вверх.
         refreshLeftMenu()
-        if (panel == Panel.LEFT && !menuCollapsed) plSelFixed.requestFocus()
     }
 
     /**
@@ -1382,11 +1399,6 @@ class PlayerActivity : Activity() {
      *   верхний блок: Настройки, Поиск передачи, Избранное (со счётчиком);
      *   затем строка-«таблетка» выбора плейлиста (PLSEL);
      *   затем Все каналы + группы выбранного плейлиста.
-     *
-     * Используется рейкой (compact-адаптер показывает все иконки в один столбец)
-     * и как источник данных для `activateCat(pos)` через `catItemsList`. В самом
-     * же catList (полное меню) остаются ТОЛЬКО категории — верхний блок теперь
-     * неподвижен при скролле (см. left-menu-pro-mark.jpg).
      */
     private fun buildCatItems(plIdx: Int): List<CatItem> {
         val items = ArrayList<CatItem>()
@@ -1405,118 +1417,11 @@ class PlayerActivity : Activity() {
         return items
     }
 
-    /** Только категории каналов — то, что реально попадает в прокручиваемый catList. */
-    private fun buildCatOnlyList(plIdx: Int): List<CatItem> {
-        val pl = playlists.getOrNull(plIdx) ?: return emptyList()
-        val list = ArrayList<CatItem>()
-        list.add(CatItem("Все каналы", pl.channels.size, "ALL"))
-        val counts = LinkedHashMap<String, Int>()
-        for (c in pl.channels) counts[c.group] = (counts[c.group] ?: 0) + 1
-        for ((g, n) in counts) list.add(CatItem(g, n, "GROUP", g))
-        return list
-    }
-
-    /**
-     * Настройка неподвижных строк верхнего блока левого меню. Вызывается один
-     * раз из onCreate: заполняет иконки и подписи, включает focusable, вешает
-     * обработчики клика (OK/тап) и стрелок (←/→/BACK). В `refreshLeftMenu()`
-     * потом обновляем только динамические данные (счётчик избранного, имя
-     * плейлиста).
-     */
-    private fun setupLeftFixedRows() {
-        // Настройки
-        IconFont.apply(settingsRow.findViewById(R.id.catIcon), "settings")
-        settingsRow.findViewById<TextView>(R.id.catName).text = "Настройки"
-        settingsRow.findViewById<TextView>(R.id.catCount).visibility = View.GONE
-        prepareFixedRow(settingsRow) { openSettingsPanel() }
-
-        // Поиск передачи
-        IconFont.apply(searchRow.findViewById(R.id.catIcon), "search")
-        searchRow.findViewById<TextView>(R.id.catName).text = "Поиск передачи"
-        searchRow.findViewById<TextView>(R.id.catCount).visibility = View.GONE
-        prepareFixedRow(searchRow) { openSearch() }
-
-        // Избранное (счётчик обновляется в updateFixedTop)
-        IconFont.apply(favRow.findViewById(R.id.catIcon), "star")
-        favRow.findViewById<TextView>(R.id.catName).text = "Избранное"
-        prepareFixedRow(favRow) { selectFavorites() }
-
-        // Таблетка «Мой плейлист» — фокусируемая, ←/→ листают плейлист,
-        // OK тоже листает вперёд (как в прототипе)
-        plSelFixed.isFocusable = true
-        plSelFixed.isFocusableInTouchMode = false
-        plSelFixed.setOnClickListener { cycleMenuPlaylist(1) }
-        plSelFixed.setOnFocusChangeListener { _, hasFocus ->
-            // визуально подсветка живёт на внутренней таблетке (drawable/plsel_bg),
-            // чтобы разделитель и подпись «смена плейлиста» не подсвечивались
-            plSelFixed.findViewById<View>(R.id.plSelRow)?.isSelected = hasFocus
-        }
-        plSelFixed.setOnKeyListener { _, keyCode, event ->
-            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
-            when (keyCode) {
-                KeyEvent.KEYCODE_DPAD_LEFT -> { cycleMenuPlaylist(-1); true }
-                KeyEvent.KEYCODE_DPAD_RIGHT -> { cycleMenuPlaylist(1); true }
-                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> { cycleMenuPlaylist(1); true }
-                KeyEvent.KEYCODE_BACK -> { closePanels(); true }
-                else -> false
-            }
-        }
-    }
-
-    /**
-     * Общая настройка неподвижной строки верхнего блока (Настройки/Поиск/Избранное):
-     * фокусируемость, подложка list_focus (те же halo-обводки, что у строк catList),
-     * клик по OK/тапу и обработка стрелок ←/BACK — закрывают меню, →/OK — открывают.
-     */
-    private fun prepareFixedRow(row: View, action: () -> Unit) {
-        row.isFocusable = true
-        row.isFocusableInTouchMode = false
-        row.isClickable = true
-        row.setBackgroundResource(R.drawable.list_focus)
-        row.setOnClickListener { action() }
-        row.setOnKeyListener { _, keyCode, event ->
-            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
-            when (keyCode) {
-                KeyEvent.KEYCODE_DPAD_LEFT -> { closePanels(); true }
-                KeyEvent.KEYCODE_DPAD_RIGHT -> { action(); true }
-                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> { action(); true }
-                KeyEvent.KEYCODE_BACK -> { closePanels(); true }
-                else -> false
-            }
-        }
-    }
-
-    /** Обновление динамических данных верхнего блока (счётчик избранного, имя плейлиста). */
-    private fun updateFixedTop() {
-        val favCnt = favoriteChannels().size
-        val favCountView = favRow.findViewById<TextView>(R.id.catCount)
-        if (favCnt > 0) {
-            favCountView.text = favCnt.toString()
-            favCountView.visibility = View.VISIBLE
-        } else {
-            favCountView.visibility = View.GONE
-        }
-        val plName = playlists.getOrNull(menuPlaylistIdx)?.name ?: "—"
-        plSelFixedName.text = plName
-    }
-
     private fun refreshLeftMenu() {
-        // catItemsList — полный список, нужен рейке и activateCat(pos) при кликах
-        catItemsList = buildCatItems(menuPlaylistIdx)
-        // catList теперь содержит ТОЛЬКО категории (верхний блок неподвижен)
-        catOnlyList = buildCatOnlyList(menuPlaylistIdx)
-        catList.adapter = CategoryAdapter(this, catOnlyList)
-        catList.setOnItemClickListener { _, _, pos, _ -> activateCatOnly(pos) }
-        updateFixedTop()
-    }
-
-    /** Клик по строке catList (в нём остались только категории каналов). */
-    private fun activateCatOnly(pos: Int) {
-        val item = catOnlyList.getOrNull(pos) ?: return
-        when (item.type) {
-            "ALL" -> selectCategory(null)
-            "GROUP" -> selectCategory(item.group)
-        }
+        val items = buildCatItems(menuPlaylistIdx)
+        catItemsList = items
+        catList.adapter = CategoryAdapter(this, items)
+        catList.setOnItemClickListener { _, _, pos, _ -> activateCat(pos) }
     }
 
     /** Открыть пункт левого меню (клик мышью или OK/вправо с пульта). */
@@ -1625,6 +1530,7 @@ class PlayerActivity : Activity() {
         val sel = if (targetStart > 0) progs.indexOfFirst { it.start == targetStart }
                   else progs.indexOfFirst { now in it.start until it.stop }
         if (sel >= 0) epgList.setSelection(maxOf(0, sel - 2))
+        updateStageDim()
     }
 
     // ------------------------------------------------------------ поиск передач (п.17)
@@ -1673,6 +1579,7 @@ class PlayerActivity : Activity() {
         searchInput.requestFocus()
         val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
         imm?.showSoftInput(searchInput, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+        updateStageDim()
     }
 
     private fun closeSearch() {
@@ -1684,6 +1591,7 @@ class PlayerActivity : Activity() {
             searchOverlay.visibility = View.GONE
             if (::leftMenu.isInitialized) leftMenu.visibility = View.GONE
             if (isPhone && currentChannel != null) phoneBar.visibility = View.VISIBLE
+            updateStageDim()
         }
     }
 
@@ -2265,6 +2173,7 @@ class PlayerActivity : Activity() {
         setList.requestFocus()
         setList.setSelection(setSelected.coerceIn(0, setItems.size - 1))
         renderSetDetail(setSelected, active = false)
+        updateStageDim()
     }
 
     private fun closeSettingsPanel() {
