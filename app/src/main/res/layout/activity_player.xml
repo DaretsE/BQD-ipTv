@@ -449,24 +449,12 @@
         </LinearLayout>
     </ScrollView>
 
-    <!--
-        Поиск передач: в прототипе живёт в одном пространстве с рейкой
-        категорий (#search.rail-shift{padding-left:116px} = 28 базовых + 88
-        ширина рейки). Рейка (см. railPanel ниже) рисуется поверх левых
-        116dp, поэтому поле ввода и результаты начинаются правее неё.
-    -->
     <FrameLayout
         android:id="@+id/searchOverlay"
         android:layout_width="match_parent" android:layout_height="match_parent"
         android:background="@color/overlay_dark"
         android:visibility="gone">
 
-      <!--
-          Содержимое вынесено в отдельный контейнер: в прототипе класс
-          rail-shift даёт содержимому поиска анимацию railIn/railOut
-          (выезд из-под рейки и уход обратно). Сама подложка при этом
-          только гаснет, иначе при сдвиге справа оголялось бы видео.
-      -->
       <LinearLayout
         android:id="@+id/searchContent"
         android:layout_width="match_parent" android:layout_height="match_parent"
@@ -521,12 +509,7 @@
             android:textColor="#3C5A63" android:textSize="56sp" />
     </FrameLayout>
 
-    <!--
-        Панель настроек — как #setPanel в прототипе: полупрозрачная подложка
-        на весь экран, список разделов шириной 400dp сдвинут на 88dp вправо
-        (место под рейку), детали начинаются с 488dp. Ширина и отступ левой
-        колонки клэмпаются в clampPanels() так же, как у списка каналов.
-    -->
+    <!-- ИЗМЕНЕННАЯ ПАНЕЛЬ НАСТРОЕК -->
     <FrameLayout
         android:id="@+id/settingsPanel"
         android:layout_width="match_parent" android:layout_height="match_parent"
@@ -535,11 +518,11 @@
         <LinearLayout
             android:id="@+id/setListPanel"
             android:layout_width="400dp" android:layout_height="match_parent"
-            android:layout_marginLeft="114dp"
+            android:layout_marginLeft="96dp" 
             android:layout_marginTop="14dp"
             android:layout_marginBottom="14dp"
             android:orientation="vertical"
-            android:background="@drawable/panel_bg_left"
+            android:background="@drawable/panel_bg_middle"
             android:paddingLeft="24dp" android:paddingRight="16dp"
             android:paddingTop="54dp" android:paddingBottom="16dp">
 
@@ -581,8 +564,10 @@
         <ScrollView
             android:id="@+id/setDetailScroll"
             android:layout_width="match_parent" android:layout_height="match_parent"
-            android:layout_marginLeft="514dp"
-            android:background="@color/panel"
+            android:layout_marginLeft="496dp"
+            android:layout_marginTop="14dp"
+            android:layout_marginBottom="14dp"
+            android:background="@drawable/panel_bg_right"
             android:paddingLeft="34dp" android:paddingRight="34dp"
             android:paddingTop="52dp" android:paddingBottom="36dp"
             android:scrollbars="none">
@@ -594,28 +579,6 @@
         </ScrollView>
     </FrameLayout>
 
-    <!--
-        Левое меню (#leftMenu в прототипе).
-
-        Внутри — ДВА независимых блока (иначе Настройки/Поиск/Избранное
-        уезжают вместе со списком групп при прокрутке):
-          1. leftFixedTop — неподвижный верхний блок (Настройки, Поиск, Избранное,
-             таблетка выбора плейлиста). Каждый пункт — включённый layout
-             item_category / item_playlist_sel. Фокус живёт на корне include'а,
-             обработка клавиш — через setOnKeyListener.
-          2. catList — прокручиваемый список только категорий (Все каналы + группы).
-             Индексы в catOnlyList = позиции в catList.
-        Навигация между блоками — через системный focusSearch (стрелки Up/Down в
-        LinearLayout автоматически переходят от последней строки catList к
-        plSelFixed и обратно).
-
-        Панель — «плавающая пилюля»: layout_marginTop/marginBottom/marginStart
-        задают отступ от краёв сцены, background=@drawable/panel_bg_left скруглён
-        со всех сторон. Между развёрнутым (392dp) и свёрнутым (88dp) состоянием
-        меняется ТОЛЬКО ширина и внутренний padding — top/bottom/marginStart/
-        border-radius одинаковые, поэтому иконки при переключении collapsed↔expanded
-        не прыгают по вертикали.
-    -->
     <LinearLayout
         android:id="@+id/leftMenu"
         android:layout_width="392dp" android:layout_height="match_parent"
