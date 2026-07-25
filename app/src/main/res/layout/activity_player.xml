@@ -509,37 +509,14 @@
             android:textColor="#3C5A63" android:textSize="56sp" />
     </FrameLayout>
 
-    <!-- ИЗМЕНЕННАЯ ПАНЕЛЬ НАСТРОЕК (Схема перекрытия слоев) -->
+    <!-- ИЗМЕНЕННАЯ ПАНЕЛЬ НАСТРОЕК (Правильный слоеный пирог) -->
     <FrameLayout
         android:id="@+id/settingsPanel"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:visibility="gone">
 
-        <!-- 1. ПРАВАЯ ПАНЕЛЬ (Третий блок из схемы) -->
-        <ScrollView
-            android:id="@+id/setDetailScroll"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:layout_marginLeft="114dp" 
-            android:layout_marginRight="14dp"
-            android:layout_marginTop="14dp"
-            android:layout_marginBottom="14dp"
-            android:background="@drawable/panel_bg_right"
-            android:paddingLeft="434dp"
-            android:paddingRight="34dp"
-            android:paddingTop="52dp"
-            android:paddingBottom="36dp"
-            android:scrollbars="none">
-
-            <LinearLayout
-                android:id="@+id/setDetail"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical" />
-        </ScrollView>
-
-        <!-- 2. СРЕДНЯЯ ПАНЕЛЬ (Второй блок из схемы) -->
+        <!-- 1. СРЕДНЯЯ ПАНЕЛЬ (Второй блок из схемы) -->
         <LinearLayout
             android:id="@+id/setListPanel"
             android:layout_width="400dp"
@@ -549,9 +526,7 @@
             android:layout_marginBottom="14dp"
             android:orientation="vertical"
             android:background="@drawable/panel_bg_middle"
-            android:elevation="20dp"
-            android:clickable="true"
-            android:focusable="true"
+            android:elevation="20dp" 
             android:paddingLeft="24dp"
             android:paddingRight="16dp"
             android:paddingTop="54dp"
@@ -591,6 +566,29 @@
                 android:paddingRight="8dp"
                 android:clipToPadding="false" />
         </LinearLayout>
+
+        <!-- 2. ПРАВАЯ ПАНЕЛЬ (Третий блок из схемы) -->
+        <ScrollView
+            android:id="@+id/setDetailScroll"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_marginLeft="494dp"
+            android:layout_marginRight="14dp"
+            android:layout_marginTop="14dp"
+            android:layout_marginBottom="14dp"
+            android:background="@drawable/panel_bg_right"
+            android:paddingLeft="54dp"
+            android:paddingRight="34dp"
+            android:paddingTop="52dp"
+            android:paddingBottom="36dp"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/setDetail"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+        </ScrollView>
     </FrameLayout>
 
     <LinearLayout
