@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <!-- Для правого окна используем тот же цвет -->
+    <!-- Используем ваш родной цвет -->
     <solid android:color="@color/panel" />
     
-    <!-- Скругляем правые углы, а левые оставляем прямыми для примыкания -->
+    <!-- Скругляем только правые углы для эффекта вырастания -->
     <corners
         android:topLeftRadius="0dp"
         android:bottomLeftRadius="0dp"
