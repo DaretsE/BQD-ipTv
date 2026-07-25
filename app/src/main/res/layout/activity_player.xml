@@ -595,19 +595,26 @@
     </FrameLayout>
 
     <!--
-        Левое меню (#leftMenu в прототипе). Селектор плейлиста больше НЕ отдельный
-        элемент сверху: в прототипе он — обычная строка списка (type PLSEL) между
-        верхним блоком (Настройки/Поиск/Избранное) и списком категорий. Так навигация
-        вверх-вниз становится линейной по всему меню, ровно как в catItems().
-        Разделителей между строками в прототипе нет — линия рисуется только
-        под верхним блоком, её рисует сам адаптер в строке PLSEL.
+        Левое меню (#leftMenu в прототипе).
+
+        Внутри — ДВА независимых блока (иначе Настройки/Поиск/Избранное
+        уезжают вместе со списком групп при прокрутке):
+          1. leftFixedTop — неподвижный верхний блок (Настройки, Поиск, Избранное,
+             таблетка выбора плейлиста). Каждый пункт — включённый layout
+             item_category / item_playlist_sel. Фокус живёт на корне include'а,
+             обработка клавиш — через setOnKeyListener.
+          2. catList — прокручиваемый список только категорий (Все каналы + группы).
+             Индексы в catOnlyList = позиции в catList.
+        Навигация между блоками — через системный focusSearch (стрелки Up/Down в
+        LinearLayout автоматически переходят от последней строки catList к
+        plSelFixed и обратно).
 
         Панель — «плавающая пилюля»: layout_marginTop/marginBottom/marginStart
         задают отступ от краёв сцены, background=@drawable/panel_bg_left скруглён
         со всех сторон. Между развёрнутым (392dp) и свёрнутым (88dp) состоянием
         меняется ТОЛЬКО ширина и внутренний padding — top/bottom/marginStart/
-        border-radius одинаковые. Из-за этого иконки Настройки/Поиск/Избранное
-        остаются на своих Y-координатах и не прыгают при сворачивании/разворачивании.
+        border-radius одинаковые, поэтому иконки при переключении collapsed↔expanded
+        не прыгают по вертикали.
     -->
     <LinearLayout
         android:id="@+id/leftMenu"
@@ -620,8 +627,29 @@
         android:paddingLeft="16dp" android:paddingRight="16dp"
         android:paddingTop="20dp" android:paddingBottom="16dp" android:visibility="gone">
 
+        <!-- неподвижный верхний блок -->
+        <LinearLayout
+            android:id="@+id/leftFixedTop"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <include layout="@layout/item_category" android:id="@+id/settingsRow"
+                android:layout_width="match_parent" android:layout_height="wrap_content" />
+
+            <include layout="@layout/item_category" android:id="@+id/searchRow"
+                android:layout_width="match_parent" android:layout_height="wrap_content" />
+
+            <include layout="@layout/item_category" android:id="@+id/favRow"
+                android:layout_width="match_parent" android:layout_height="wrap_content" />
+
+            <include layout="@layout/item_playlist_sel" android:id="@+id/plSelFixed"
+                android:layout_width="match_parent" android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <!-- прокручиваемый список категорий (только ALL + GROUP) -->
         <ListView android:id="@+id/catList"
-            android:layout_width="match_parent" android:layout_height="match_parent"
+            android:layout_width="match_parent" android:layout_height="0dp"
+            android:layout_weight="1"
             android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true"
             android:divider="@null" android:dividerHeight="0dp"
             android:scrollbars="vertical"
@@ -629,7 +657,7 @@
             android:scrollbarSize="6dp"
             android:scrollbarThumbVertical="@drawable/scrollbar_thumb"
             android:fadeScrollbars="false"
-            android:paddingTop="8dp" android:paddingBottom="8dp"
+            android:paddingTop="4dp" android:paddingBottom="8dp"
             android:paddingRight="4dp"
             android:clipToPadding="false" />
     </LinearLayout>

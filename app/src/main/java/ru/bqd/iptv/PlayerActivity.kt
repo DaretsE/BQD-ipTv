@@ -82,6 +82,18 @@ class PlayerActivity : Activity() {
     private lateinit var prevNext: TextView
 
     private lateinit var leftMenu: View
+    // фиксированный верхний блок левого меню — Настройки/Поиск/Избранное + таблетка плейлиста.
+    // Не участвует в catList.adapter: 4 focusable View со своими обработчиками. Индексами
+    // catItemsList/catOnlyList не адресуется, поэтому не «уезжает» при прокрутке.
+    private lateinit var leftFixedTop: View
+    private lateinit var settingsRow: View
+    private lateinit var searchRow: View
+    private lateinit var favRow: View
+    private lateinit var favRowCount: TextView
+    private lateinit var plSelFixed: View
+    private lateinit var plSelFixedName: TextView
+    // catList теперь содержит только ALL + GROUP; catOnlyList — их модель
+    private var catOnlyList: List<CatItem> = emptyList()
     private lateinit var catList: ListView
 
     private lateinit var rightPanel: View
@@ -251,6 +263,7 @@ class PlayerActivity : Activity() {
         osdBtnNext = findViewById(R.id.osdBtnNext)
         osdBtnLast = findViewById(R.id.osdBtnLast)
         setupOsdButtons()
+        setupLeftFixedRows()
         // рейка — визуальный указатель категории, фокус на неё не переводится
         stageDim = findViewById(R.id.stageDim)
         settingsPanel = findViewById(R.id.settingsPanel)
@@ -275,6 +288,17 @@ class PlayerActivity : Activity() {
         prevRemain = findViewById(R.id.prevRemain)
         prevNext = findViewById(R.id.prevNext)
         leftMenu = findViewById(R.id.leftMenu)
+        leftFixedTop = findViewById(R.id.leftFixedTop)
+        settingsRow = findViewById(R.id.settingsRow)
+        searchRow = findViewById(R.id.searchRow)
+        favRow = findViewById(R.id.favRow)
+        // catCount у include'а favRow: обращаемся через favRow, т.к. R.id.catCount
+        // дублируется в трёх включённых item_category (у settingsRow/searchRow счётчик
+        // не используется, но их internal id тоже дублируются)
+        favRowCount = favRow.findViewById(R.id.catCount)
+        plSelFixed = findViewById(R.id.plSelFixed)
+        // название плейлиста внутри include item_playlist_sel
+        plSelFixedName = plSelFixed.findViewById(R.id.plSelName)
         catList = findViewById(R.id.catList)
         rightPanel = findViewById(R.id.rightPanel)
         epgHeader = findViewById(R.id.epgHeader)
@@ -924,31 +948,28 @@ class PlayerActivity : Activity() {
         return when (panel) {
             Panel.NONE -> handleFullscreenKey(event)
             Panel.LEFT -> {
+                // В верхнем блоке (leftFixedTop) клавиши перехватывают setOnKeyListener'ы
+                // на самих строках. Здесь обрабатываем только случай, когда фокус в catList.
+                val focus = currentFocus
+                val inCatList = focus === catList || (focus?.parent === catList)
                 if (event.action == KeyEvent.ACTION_DOWN) {
-                    val pos = catList.selectedItemPosition
-                    val type = catItemsList.getOrNull(pos)?.type
-                    when (event.keyCode) {
-                        // ←/→ листают плейлист ТОЛЬКО когда выделена строка-селектор (как в прототипе),
-                        // на остальных пунктах ← закрывает меню, → открывает пункт
-                        KeyEvent.KEYCODE_DPAD_LEFT -> {
-                            if (type == "PLSEL") cycleMenuPlaylist(-1) else closePanels()
-                            return true
+                    // п.3: удержание «Вверх» ~1 сек — прыжок на пункт «Настройки».
+                    // Ловим и в catList, и в верхнем блоке (кроме самой settingsRow).
+                    if (event.keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                        if (event.repeatCount == 0 && focus !== settingsRow) {
+                            upHeldFired = false
+                            handler.postDelayed(upHoldRunnable, 1000)
                         }
-                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                            if (type == "PLSEL") cycleMenuPlaylist(1) else activateCat(pos)
-                            return true
-                        }
-                        KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
-                            activateCat(pos); return true
-                        }
-                        KeyEvent.KEYCODE_BACK -> { closePanels(); return true }
-                        // п.3: удержание «Вверх» ~1 сек — прыжок на пункт «Настройки»
-                        KeyEvent.KEYCODE_DPAD_UP -> {
-                            if (event.repeatCount == 0) {
-                                upHeldFired = false
-                                handler.postDelayed(upHoldRunnable, 1000)
-                            }
-                            return super.dispatchKeyEvent(event)
+                        return super.dispatchKeyEvent(event)
+                    }
+                    if (inCatList) {
+                        val pos = catList.selectedItemPosition
+                        when (event.keyCode) {
+                            KeyEvent.KEYCODE_DPAD_LEFT -> { closePanels(); return true }
+                            KeyEvent.KEYCODE_DPAD_RIGHT,
+                            KeyEvent.KEYCODE_DPAD_CENTER,
+                            KeyEvent.KEYCODE_ENTER -> { activateCatOnly(pos); return true }
+                            KeyEvent.KEYCODE_BACK -> { closePanels(); return true }
                         }
                     }
                 }
@@ -1035,8 +1056,8 @@ class PlayerActivity : Activity() {
     private val upHoldRunnable = Runnable {
         upHeldFired = true
         if (panel == Panel.LEFT) {
-            val idx = catItemsList.indexOfFirst { it.type == "SETTINGS" }
-            if (idx >= 0) { catList.requestFocus(); catList.setSelection(idx) }
+            // фикс. верхний блок теперь отдельный: прыгаем прямо на настройки
+            settingsRow.requestFocus()
         }
     }
 
@@ -1084,6 +1105,9 @@ class PlayerActivity : Activity() {
         val wasVisible = leftMenu.visibility == View.VISIBLE
         leftMenu.visibility = View.VISIBLE
         menuCollapsed = true
+        // в рейке от верхнего блока остаются только иконки, которые рисует refreshRail()
+        // на самом catList (compact-режим адаптера). Фиксированный блок скрываем целиком.
+        if (::leftFixedTop.isInitialized) leftFixedTop.visibility = View.GONE
         refreshRail(activeOverrideType)
         // фокус рейка не забирает — это индикатор, а не зона навигации
         catList.isFocusable = false
@@ -1108,6 +1132,7 @@ class PlayerActivity : Activity() {
         catList.isFocusableInTouchMode = true
         catList.isEnabled = true
         catList.isVerticalScrollBarEnabled = true
+        if (::leftFixedTop.isInitialized) leftFixedTop.visibility = View.VISIBLE
         if (animate) animateMenuWidth(dp(MENU_W_FULL), dp(MENU_PAD_FULL))
         else setMenuWidth(dp(MENU_W_FULL), dp(MENU_PAD_FULL))
     }
@@ -1374,14 +1399,24 @@ class PlayerActivity : Activity() {
         // если меню уже висело рейкой — плавно разворачиваем, иначе въезжаем слева
         expandMenu(animate = wasCollapsed)
         if (!wasCollapsed) animPanelInLeft(leftMenu)
-        catList.requestFocus()
-        // выделение — на текущем разделе, а не всегда на первой строке
-        val sel = when {
-            curPlaylistIdx == -1 -> catItemsList.indexOfFirst { it.type == "FAV" }
-            curCategory == null -> catItemsList.indexOfFirst { it.type == "ALL" }
-            else -> catItemsList.indexOfFirst { it.type == "GROUP" && it.group == curCategory }
+        // Верхний блок теперь виден в развёрнутом состоянии
+        leftFixedTop.visibility = View.VISIBLE
+        // Фокус ставим на текущий раздел:
+        //   Избранное → favRow (в неподвижном блоке);
+        //   ALL / GROUP → соответствующая строка в catList.
+        when {
+            curPlaylistIdx == -1 -> favRow.requestFocus()
+            curCategory == null -> {
+                catList.requestFocus()
+                val sel = catOnlyList.indexOfFirst { it.type == "ALL" }
+                if (sel >= 0) catList.setSelection(sel)
+            }
+            else -> {
+                catList.requestFocus()
+                val sel = catOnlyList.indexOfFirst { it.type == "GROUP" && it.group == curCategory }
+                if (sel >= 0) catList.setSelection(sel)
+            }
         }
-        if (sel >= 0) catList.setSelection(sel)
         updateStageDim()
     }
 
@@ -1392,6 +1427,8 @@ class PlayerActivity : Activity() {
         if (menuPlaylistIdx < 0) menuPlaylistIdx = max
         if (menuPlaylistIdx > max) menuPlaylistIdx = 0
         refreshLeftMenu()
+        // Возвращаем фокус обратно на таблетку, чтобы стрелки ← → работали серией
+        plSelFixed.requestFocus()
     }
 
     /**
@@ -1417,11 +1454,115 @@ class PlayerActivity : Activity() {
         return items
     }
 
+    /**
+     * Настройка неподвижного верхнего блока левого меню. Вызывается один раз в onCreate.
+     * Каждая строка — включённый layout (item_category / item_playlist_sel), фокусируется
+     * как единое целое, обработка клавиш — через setOnKeyListener.
+     */
+    private fun setupLeftFixedRows() {
+        // Настройки
+        val settingsIcon = settingsRow.findViewById<TextView>(R.id.catIcon)
+        val settingsName = settingsRow.findViewById<TextView>(R.id.catName)
+        val settingsCount = settingsRow.findViewById<TextView>(R.id.catCount)
+        IconFont.apply(settingsIcon, "settings")
+        settingsName.text = "Настройки"
+        settingsCount.visibility = View.GONE
+        prepareFixedRow(settingsRow) { openSettingsPanel() }
+
+        // Поиск передачи
+        val searchIcon = searchRow.findViewById<TextView>(R.id.catIcon)
+        val searchName = searchRow.findViewById<TextView>(R.id.catName)
+        val searchCount = searchRow.findViewById<TextView>(R.id.catCount)
+        IconFont.apply(searchIcon, "search")
+        searchName.text = "Поиск передачи"
+        searchCount.visibility = View.GONE
+        prepareFixedRow(searchRow) { openSearch() }
+
+        // Избранное — единственная фиксированная строка со счётчиком
+        val favIcon = favRow.findViewById<TextView>(R.id.catIcon)
+        val favName = favRow.findViewById<TextView>(R.id.catName)
+        IconFont.apply(favIcon, "star")
+        favName.text = "Избранное"
+        prepareFixedRow(favRow) { selectFavorites() }
+
+        // Таблетка плейлиста: фокус на корне include'а, подсветку получает
+        // внутренняя plSelRow через isSelected (см. plsel_bg.xml state_selected).
+        plSelFixed.isFocusable = true
+        plSelFixed.isFocusableInTouchMode = false
+        // блокируем внутренние view от перехвата фокуса
+        (plSelFixed as? android.view.ViewGroup)?.descendantFocusability =
+            android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS
+        val plSelRow = plSelFixed.findViewById<View>(R.id.plSelRow)
+        plSelFixed.setOnFocusChangeListener { _, hasFocus ->
+            plSelRow?.isSelected = hasFocus
+        }
+        plSelFixed.setOnKeyListener { _, keyCode, event ->
+            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_LEFT -> { cycleMenuPlaylist(-1); true }
+                KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER -> { cycleMenuPlaylist(1); true }
+                KeyEvent.KEYCODE_BACK -> { closePanels(); true }
+                else -> false
+            }
+        }
+        plSelFixed.setOnClickListener { cycleMenuPlaylist(1) }
+    }
+
+    /** Общий хелпер для 3 верхних строк (Настройки/Поиск/Избранное). */
+    private fun prepareFixedRow(row: View, action: () -> Unit) {
+        row.isFocusable = true
+        row.isFocusableInTouchMode = false
+        row.setBackgroundResource(R.drawable.list_focus)
+        row.setOnClickListener { action() }
+        row.setOnKeyListener { _, keyCode, event ->
+            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER -> { action(); true }
+                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_BACK -> { closePanels(); true }
+                else -> false
+            }
+        }
+    }
+
+    /** Обновляет динамические подписи неподвижного блока (счётчик избранного, имя плейлиста). */
+    private fun updateFixedTop() {
+        val favCount = favoriteChannels().size
+        favRowCount.text = favCount.toString()
+        favRowCount.visibility = if (favCount > 0) View.VISIBLE else View.GONE
+        plSelFixedName.text = playlists.getOrNull(menuPlaylistIdx)?.name ?: "—"
+    }
+
+    /** Только категории (ALL + GROUP) выбранного плейлиста — для catList. */
+    private fun buildCatOnlyList(plIdx: Int): List<CatItem> {
+        val items = ArrayList<CatItem>()
+        val pl = playlists.getOrNull(plIdx) ?: return items
+        items.add(CatItem("Все каналы", pl.channels.size, "ALL"))
+        val counts = LinkedHashMap<String, Int>()
+        for (c in pl.channels) counts[c.group] = (counts[c.group] ?: 0) + 1
+        for ((g, n) in counts) items.add(CatItem(g, n, "GROUP", g))
+        return items
+    }
+
+    /** Клик по строке catList — только ALL/GROUP, служебные пункты — в верхнем блоке. */
+    private fun activateCatOnly(pos: Int) {
+        val item = catOnlyList.getOrNull(pos) ?: return
+        when (item.type) {
+            "ALL" -> selectCategory(null)
+            "GROUP" -> selectCategory(item.group)
+        }
+    }
+
     private fun refreshLeftMenu() {
-        val items = buildCatItems(menuPlaylistIdx)
-        catItemsList = items
-        catList.adapter = CategoryAdapter(this, items)
-        catList.setOnItemClickListener { _, _, pos, _ -> activateCat(pos) }
+        // catItemsList остаётся для refreshRail() и обратной совместимости
+        catItemsList = buildCatItems(menuPlaylistIdx)
+        // Верхний блок (не участвует в catList.adapter)
+        updateFixedTop()
+        // Прокручиваемый список: только ALL + GROUP
+        catOnlyList = buildCatOnlyList(menuPlaylistIdx)
+        catList.adapter = CategoryAdapter(this, catOnlyList)
+        catList.setOnItemClickListener { _, _, pos, _ -> activateCatOnly(pos) }
     }
 
     /** Открыть пункт левого меню (клик мышью или OK/вправо с пульта). */
