@@ -263,7 +263,6 @@ class PlayerActivity : Activity() {
         osdBtnNext = findViewById(R.id.osdBtnNext)
         osdBtnLast = findViewById(R.id.osdBtnLast)
         setupOsdButtons()
-        setupLeftFixedRows()
         // рейка — визуальный указатель категории, фокус на неё не переводится
         stageDim = findViewById(R.id.stageDim)
         settingsPanel = findViewById(R.id.settingsPanel)
@@ -300,6 +299,8 @@ class PlayerActivity : Activity() {
         // название плейлиста внутри include item_playlist_sel
         plSelFixedName = plSelFixed.findViewById(R.id.plSelName)
         catList = findViewById(R.id.catList)
+        // Верхний блок готов — теперь можно навешивать обработчики клавиш и клики
+        setupLeftFixedRows()
         rightPanel = findViewById(R.id.rightPanel)
         epgHeader = findViewById(R.id.epgHeader)
         nowTitle = findViewById(R.id.nowTitle)
