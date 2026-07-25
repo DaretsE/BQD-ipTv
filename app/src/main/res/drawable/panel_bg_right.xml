@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Правая панель телепрограммы: скругление слева. -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <solid android:color="@color/panel"/>
-    <corners android:topLeftRadius="24dp" android:bottomLeftRadius="24dp"/>
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="#CC071923" />
+    <corners
+        android:topLeftRadius="0dp"
+        android:bottomLeftRadius="0dp"
+        android:topRightRadius="16dp"
+        android:bottomRightRadius="16dp" />
 </shape>
