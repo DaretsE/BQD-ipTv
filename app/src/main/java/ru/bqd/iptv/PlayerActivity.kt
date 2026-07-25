@@ -1588,7 +1588,10 @@ class PlayerActivity : Activity() {
             val keep = zapList.indexOfFirst { it.url == currentChannel?.url }
             zapIndex = if (keep >= 0) keep else 0
             openChannelBrowser()
-        } else { panel = Panel.NONE; toast("В избранном пока пусто") }
+        } else {
+            // НЕ меняем panel — остаёмся в левом меню, фокус остаётся на favRow
+            toast("В избранном пока пусто")
+        }
     }
 
     private fun selectCategory(group: String?) {
@@ -2327,6 +2330,23 @@ class PlayerActivity : Activity() {
         }
     }
 
+    /**
+     * Возврат из настроек обратно в полное левое меню (аналог closeRailSettings()
+     * в прототипе). Настройки скрываются, рейка разворачивается в полное меню,
+     * фокус возвращается на строку «Настройки».
+     */
+    private fun returnToLeftMenu() {
+        setDetailActive = false
+        if (::setList.isInitialized) setList.isFocusable = true
+        settingsPanel.visibility = View.GONE
+        panel = Panel.LEFT
+        expandMenu(animate = true)
+        if (::leftFixedTop.isInitialized) leftFixedTop.visibility = View.VISIBLE
+        refreshLeftMenu()
+        settingsRow.requestFocus()
+        updateStageDim()
+    }
+
     private fun refreshSetList() {
         (setList.adapter as? SettingsAdapter)?.refresh()
     }
@@ -2879,11 +2899,11 @@ class PlayerActivity : Activity() {
         if (event.action != KeyEvent.ACTION_DOWN) return super.dispatchKeyEvent(event)
         when (event.keyCode) {
             KeyEvent.KEYCODE_BACK -> {
-                if (setDetailActive) leaveSetDetail() else closeSettingsPanel()
+                if (setDetailActive) leaveSetDetail() else returnToLeftMenu()
                 return true
             }
             KeyEvent.KEYCODE_DPAD_LEFT -> {
-                if (!setDetailActive) { closeSettingsPanel(); return true }
+                if (!setDetailActive) { returnToLeftMenu(); return true }
                 // влево внутри строки; с первой ячейки — назад в список разделов
                 if (setCol > 0) { setCol--; applySdFocus() } else leaveSetDetail()
                 return true
