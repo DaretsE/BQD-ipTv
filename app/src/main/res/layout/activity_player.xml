@@ -168,8 +168,7 @@
         android:layout_width="match_parent" android:layout_height="match_parent"
         android:visibility="gone">
 
-        <!-- 1. ПРЕВЬЮ КАРТОЧКА (Нижний слой). Рисуется первой, прячется под списком каналов -->
-        <!-- Поменяли фон на новый градиент слева-направо -->
+        <!-- 1. ПРЕВЬЮ КАРТОЧКА -->
         <LinearLayout
             android:id="@+id/previewCard"
             android:layout_width="match_parent" android:layout_height="wrap_content"
@@ -218,8 +217,7 @@
                 android:singleLine="true" android:ellipsize="end" />
         </LinearLayout>
 
-        <!-- 2. СПИСОК КАНАЛОВ (Средний слой). Рисуется вторым, ложится поверх превью -->
-        <!-- Поменяли фон на panel_bg_middle (#193A4E), чтобы совпадал с настройками -->
+        <!-- 2. СПИСОК КАНАЛОВ -->
         <LinearLayout
             android:id="@+id/browserList"
             android:layout_width="540dp" android:layout_height="match_parent"
@@ -249,6 +247,7 @@
                 android:layout_marginLeft="4dp" android:layout_marginBottom="12dp"
                 android:background="@drawable/hdr_underline" />
 
+            <!-- ИСПРАВЛЕНИЕ: Удалены clipToPadding и вертикальные паддинги -->
             <ListView android:id="@+id/browserListView"
                 android:layout_width="match_parent" android:layout_height="match_parent"
                 android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true"
@@ -258,9 +257,7 @@
                 android:scrollbarSize="6dp"
                 android:scrollbarThumbVertical="@drawable/scrollbar_thumb"
                 android:fadeScrollbars="false"
-                android:paddingTop="6dp" android:paddingBottom="6dp"
-                android:paddingRight="8dp"
-                android:clipToPadding="false" />
+                android:paddingRight="8dp" />
         </LinearLayout>
     </FrameLayout>
 
@@ -483,13 +480,12 @@
             android:textColor="@color/text_dim" android:textSize="14sp"
             android:paddingTop="14dp" android:paddingBottom="6dp" />
 
+        <!-- ИСПРАВЛЕНИЕ: Удалены clipToPadding и вертикальные паддинги -->
         <ListView
             android:id="@+id/searchResults"
             android:layout_width="match_parent" android:layout_height="match_parent"
             android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true" android:divider="@color/hairline" android:dividerHeight="1dp"
-            android:scrollbars="none"
-            android:paddingTop="6dp" android:paddingBottom="6dp"
-            android:clipToPadding="false" />
+            android:scrollbars="none" />
       </LinearLayout>
     </FrameLayout>
 
@@ -569,6 +565,7 @@
                 android:layout_marginLeft="4dp" android:layout_marginBottom="12dp"
                 android:background="@drawable/hdr_underline" />
 
+            <!-- ИСПРАВЛЕНИЕ: Удалены clipToPadding и вертикальные паддинги -->
             <ListView
                 android:id="@+id/setList"
                 android:layout_width="match_parent"
@@ -582,10 +579,7 @@
                 android:scrollbarSize="6dp"
                 android:scrollbarThumbVertical="@drawable/scrollbar_thumb"
                 android:fadeScrollbars="false"
-                android:paddingTop="6dp"
-                android:paddingBottom="6dp"
-                android:paddingRight="8dp"
-                android:clipToPadding="false" />
+                android:paddingRight="8dp" />
         </LinearLayout>
     </FrameLayout>
 
@@ -625,6 +619,7 @@
                 android:layout_width="match_parent" android:layout_height="wrap_content" />
         </LinearLayout>
 
+        <!-- ИСПРАВЛЕНИЕ: Удалены clipToPadding и вертикальные паддинги -->
         <ListView android:id="@+id/catList"
             android:layout_width="match_parent"
             android:layout_height="0dp"
@@ -638,10 +633,7 @@
             android:scrollbarSize="6dp"
             android:scrollbarThumbVertical="@drawable/scrollbar_thumb"
             android:fadeScrollbars="false"
-            android:paddingTop="4dp"
-            android:paddingBottom="8dp"
-            android:paddingRight="4dp"
-            android:clipToPadding="false" />
+            android:paddingRight="4dp" />
     </LinearLayout>
 
     <TextView
