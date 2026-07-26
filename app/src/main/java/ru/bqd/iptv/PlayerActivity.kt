@@ -123,6 +123,20 @@ class PlayerActivity : Activity() {
     private var focusResultsAfterSearch = false
     private val searchRunnable = Runnable { doSearch() }
 
+    // --- ИСПРАВЛЕНИЕ: Отложенное обновление адаптера ---
+    private var pendingAdapterPos = -1
+    private val updateAdapterRunnable = Runnable {
+        val currentAdapter = browserListView.adapter as? ChannelAdapter
+        if (currentAdapter != null && currentAdapter.selectedPos != pendingAdapterPos) {
+            currentAdapter.selectedPos = pendingAdapterPos
+            if (currentAdapter.actionFocused) {
+                currentAdapter.actionFocused = false
+                browserActionFocused = false
+                browserListView.setSelector(R.drawable.list_focus)
+            }
+        }
+    }
+
     private val handler = Handler(Looper.getMainLooper())
 
     private var playlists: List<Playlist> = emptyList()
@@ -1121,19 +1135,13 @@ class PlayerActivity : Activity() {
         }
         browserListView.setOnItemSelectedListener(object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(p: android.widget.AdapterView<*>?, v: View?, pos: Int, id: Long) {
-                // ИСПРАВЛЕНИЕ: Откладываем обновление внутреннего состояния адаптера, 
-                // чтобы не прерывать системную анимацию листания и не сбивать фокус.
-                browserListView.post {
-                    val currentAdapter = browserListView.adapter as? ChannelAdapter
-                    if (currentAdapter != null && currentAdapter.selectedPos != pos) {
-                        currentAdapter.selectedPos = pos
-                        if (currentAdapter.actionFocused) {
-                            currentAdapter.actionFocused = false
-                            browserActionFocused = false
-                            browserListView.setSelector(R.drawable.list_focus)
-                        }
-                    }
-                }
+                // --- ИСПРАВЛЕНИЕ: Отложенное обновление (Debounce) ---
+                // Даем списку время на плавную системную анимацию прокрутки (150 мс),
+                // чтобы notifyDataSetChanged() не разрушил список прямо во время движения.
+                pendingAdapterPos = pos
+                handler.removeCallbacks(updateAdapterRunnable)
+                handler.postDelayed(updateAdapterRunnable, 150)
+                
                 updatePreview(browserChannels.getOrNull(pos))
                 if (Store.livePreview) scheduleLivePreview(browserChannels.getOrNull(pos))
             }
@@ -1273,6 +1281,7 @@ class PlayerActivity : Activity() {
 
     private fun cancelBrowse() {
         handler.removeCallbacks(livePreviewRunnable)
+        handler.removeCallbacks(updateAdapterRunnable)
         if (Store.livePreview && !isCatchupPlayback &&
             channelBeforeBrowse != null && currentChannel?.url != channelBeforeBrowse?.url) {
             channelBeforeBrowse?.let { play(it) }
@@ -1877,7 +1886,7 @@ class PlayerActivity : Activity() {
             .setItems(options) { _, which ->
                 Store.retryMode = values[which]
                 rebuildPlayerKeepingChannel()
-                toast("При обрыве: ${Quality.retryLabel()}");
+                toast("При обрыве: ${Quality.retryLabel()}")
             }.show()
     }
 
