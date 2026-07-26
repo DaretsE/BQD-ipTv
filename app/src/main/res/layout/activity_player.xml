@@ -247,9 +247,11 @@
                 android:layout_marginLeft="4dp" android:layout_marginBottom="12dp"
                 android:background="@drawable/hdr_underline" />
 
-            <!-- ИСПРАВЛЕНИЕ: Удалены clipToPadding и вертикальные паддинги -->
+            <!-- ИСПРАВЛЕНИЕ СКОРОСТИ ЛИСТАНИЯ: layout_height="0dp", layout_weight="1" -->
             <ListView android:id="@+id/browserListView"
-                android:layout_width="match_parent" android:layout_height="match_parent"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
                 android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true"
                 android:divider="@null" android:dividerHeight="0dp"
                 android:scrollbars="vertical"
@@ -308,8 +310,11 @@
             android:text="ПРОГРАММА ПЕРЕДАЧ" android:textColor="@color/text_dim2" android:textSize="12sp"
             android:paddingBottom="6dp" />
 
+        <!-- ИСПРАВЛЕНИЕ: layout_height="0dp", layout_weight="1" -->
         <ListView android:id="@+id/epgList"
-            android:layout_width="match_parent" android:layout_height="match_parent"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
             android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true" android:divider="@color/hairline" android:dividerHeight="1dp" />
     </LinearLayout>
 
@@ -480,10 +485,12 @@
             android:textColor="@color/text_dim" android:textSize="14sp"
             android:paddingTop="14dp" android:paddingBottom="6dp" />
 
-        <!-- ИСПРАВЛЕНИЕ: Удалены clipToPadding и вертикальные паддинги -->
+        <!-- ИСПРАВЛЕНИЕ: layout_height="0dp", layout_weight="1" -->
         <ListView
             android:id="@+id/searchResults"
-            android:layout_width="match_parent" android:layout_height="match_parent"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
             android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true" android:divider="@color/hairline" android:dividerHeight="1dp"
             android:scrollbars="none" />
       </LinearLayout>
@@ -565,11 +572,12 @@
                 android:layout_marginLeft="4dp" android:layout_marginBottom="12dp"
                 android:background="@drawable/hdr_underline" />
 
-            <!-- ИСПРАВЛЕНИЕ: Удалены clipToPadding и вертикальные паддинги -->
+            <!-- ИСПРАВЛЕНИЕ: layout_height="0dp", layout_weight="1" -->
             <ListView
                 android:id="@+id/setList"
                 android:layout_width="match_parent"
-                android:layout_height="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
                 android:listSelector="@drawable/list_focus"
                 android:drawSelectorOnTop="true"
                 android:divider="@null"
@@ -619,7 +627,6 @@
                 android:layout_width="match_parent" android:layout_height="wrap_content" />
         </LinearLayout>
 
-        <!-- ИСПРАВЛЕНИЕ: Удалены clipToPadding и вертикальные паддинги -->
         <ListView android:id="@+id/catList"
             android:layout_width="match_parent"
             android:layout_height="0dp"
