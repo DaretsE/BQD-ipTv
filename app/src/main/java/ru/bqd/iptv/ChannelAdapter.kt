@@ -21,10 +21,13 @@ import android.widget.TextView
  * эмулируется: PlayerActivity выставляет actionFocused, а адаптер рисует
  * подсветку через state_activated.
  *
- * ИСПРАВЛЕНИЕ СКРОЛЛА: вместо notifyDataSetChanged() при смене selectedPos
- * и actionFocused используется точечная перерисовка только затронутых строк
- * через invalidatePosition(). Это убирает дёрганье/мерцание при прокрутке,
- * потому что ListView больше не пересоздаёт ВСЕ видимые строки на каждый шаг.
+ * ИСПРАВЛЕНИЕ СКРОЛЛА:
+ *  1. ViewHolder — убраны повторные findViewById на каждый getView.
+ *  2. rowAction — INVISIBLE вместо GONE: строка всегда 64dp, layout не
+ *     пересчитывается при смене выделения → нет дёрганья.
+ *  3. selectedPos/actionFocused — обновляют только затронутые строки через
+ *     post(), чтобы не пересекаться с layout-пассом ListView → нет
+ *     «залипания» на последнем видимом пункте.
  */
 class ChannelAdapter(
     private val ctx: Context,
@@ -32,36 +35,36 @@ class ChannelAdapter(
     private val showNow: Boolean
 ) : BaseAdapter() {
 
-    /** Ссылка на ListView, нужна для точечной перерисовки. Устанавливается снаружи. */
+    /** Ссылка на ListView — нужна для точечной перерисовки. */
     var listView: ListView? = null
 
     /** Позиция выделенной строки (у неё показывается кнопка). -1 — нет. */
     var selectedPos: Int = -1
         set(v) {
-            if (field != v) {
-                val old = field
-                field = v
-                // Перерисовываем только старую и новую строку, а не весь список
-                invalidatePosition(old)
-                invalidatePosition(v)
+            if (field == v) return
+            val old = field
+            field = v
+            // post — чтобы обновление не попало внутрь layout-пасса ListView
+            listView?.post {
+                refreshPosition(old)
+                refreshPosition(v)
             }
         }
 
     /** Фокус переведён на кнопку действия выделенной строки. */
     var actionFocused: Boolean = false
         set(v) {
-            if (field != v) {
-                field = v
-                // Перерисовываем только строку с кнопкой
-                invalidatePosition(selectedPos)
-            }
+            if (field == v) return
+            field = v
+            listView?.post { refreshPosition(selectedPos) }
         }
 
     /**
-     * Перерисовать одну строку в ListView без пересоздания всего списка.
-     * Находим View строки среди видимых детей и вызываем getView() только для неё.
+     * Перерисовать одну видимую строку, не трогая остальные.
+     * Вызываем getView на существующем child — ViewHolder уже на месте,
+     * inflate не произойдёт, только обновятся данные.
      */
-    private fun invalidatePosition(pos: Int) {
+    private fun refreshPosition(pos: Int) {
         val lv = listView ?: return
         val first = lv.firstVisiblePosition
         val last = lv.lastVisiblePosition
@@ -76,7 +79,6 @@ class ChannelAdapter(
     override fun getItem(p: Int) = items[p]
     override fun getItemId(p: Int) = p.toLong()
 
-    /** ViewHolder — кэшируем findViewById, чтобы не дёргать его при каждой прокрутке. */
     private class VH(v: View) {
         val num: TextView = v.findViewById(R.id.rowNum)
         val logo: ImageView = v.findViewById(R.id.rowLogo)
@@ -91,7 +93,7 @@ class ChannelAdapter(
         val h: VH
         if (convertView?.tag is VH) {
             v = convertView
-            h = convertView.tag as VH
+            h = v.tag as VH
         } else {
             v = convertView ?: LayoutInflater.from(ctx).inflate(R.layout.item_channel, parent, false)
             h = VH(v)
@@ -112,11 +114,9 @@ class ChannelAdapter(
         } else h.now.visibility = View.GONE
 
         val fav = Store.isFavorite(ch.url)
-        // звёздочку-признак прячем у выделенной строки: там уже есть кнопка
         h.star.visibility = if (fav && position != selectedPos) View.VISIBLE else View.GONE
 
         if (position == selectedPos) {
-            // кнопка нейтральная; цвет и свечение появляются только когда на ней фокус
             h.action.visibility = View.VISIBLE
             if (fav) {
                 h.action.setBackgroundResource(R.drawable.rowbtn_del)
@@ -129,7 +129,8 @@ class ChannelAdapter(
             }
             h.action.isActivated = actionFocused
         } else {
-            h.action.visibility = View.GONE
+            // INVISIBLE, а не GONE — высота строки не меняется, ListView не дёргается
+            h.action.visibility = View.INVISIBLE
             h.action.isActivated = false
         }
         return v
