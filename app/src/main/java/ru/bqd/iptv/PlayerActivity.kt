@@ -123,20 +123,8 @@ class PlayerActivity : Activity() {
     private var focusResultsAfterSearch = false
     private val searchRunnable = Runnable { doSearch() }
 
-    // --- ИСПРАВЛЕНИЕ СКРОЛЛА: Отложенное обновление адаптера (Debounce) ---
-    // Это не дает адаптеру перерисовывать список во время плавной прокрутки.
-    private var pendingAdapterPos = -1
-    private val updateAdapterRunnable = Runnable {
-        val currentAdapter = browserListView.adapter as? ChannelAdapter
-        if (currentAdapter != null && currentAdapter.selectedPos != pendingAdapterPos) {
-            currentAdapter.selectedPos = pendingAdapterPos
-            if (currentAdapter.actionFocused) {
-                currentAdapter.actionFocused = false
-                browserActionFocused = false
-                browserListView.setSelector(R.drawable.list_focus)
-            }
-        }
-    }
+    // Дебаунс убран: ChannelAdapter теперь перерисовывает только изменённые строки,
+    // а не весь список, поэтому selectedPos можно обновлять мгновенно без дёрганья.
 
     private val handler = Handler(Looper.getMainLooper())
 
@@ -1128,6 +1116,7 @@ class PlayerActivity : Activity() {
         browserPlName.text = (if (curPlaylistIdx == -1) "Избранное"
             else playlists.getOrNull(curPlaylistIdx)?.name ?: "").uppercase()
         val adapter = ChannelAdapter(this, browserChannels, showNow = true)
+        adapter.listView = browserListView
         browserListView.adapter = adapter
         browserListView.setOnItemClickListener { _, _, pos, _ ->
             zapIndex = pos
@@ -1136,13 +1125,17 @@ class PlayerActivity : Activity() {
         }
         browserListView.setOnItemSelectedListener(object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(p: android.widget.AdapterView<*>?, v: View?, pos: Int, id: Long) {
-                // --- ИСПРАВЛЕНИЕ СКРОЛЛА ---
-                // Мы больше не "дергаем" адаптер прямо во время переключения фокуса,
-                // чтобы не убить анимацию списка. Мы ждем 250 мс.
-                pendingAdapterPos = pos
-                handler.removeCallbacks(updateAdapterRunnable)
-                handler.postDelayed(updateAdapterRunnable, 250)
-                
+                // Точечное обновление: перерисовываются только старая и новая строка,
+                // поэтому можно обновлять мгновенно без дёрганья всего списка.
+                val a = browserListView.adapter as? ChannelAdapter
+                if (a != null && a.selectedPos != pos) {
+                    if (a.actionFocused) {
+                        a.actionFocused = false
+                        browserActionFocused = false
+                        browserListView.setSelector(R.drawable.list_focus)
+                    }
+                    a.selectedPos = pos
+                }
                 updatePreview(browserChannels.getOrNull(pos))
                 if (Store.livePreview) scheduleLivePreview(browserChannels.getOrNull(pos))
             }
@@ -1210,8 +1203,6 @@ class PlayerActivity : Activity() {
             KeyEvent.KEYCODE_DPAD_RIGHT -> {
                 if (!browserActionFocused) {
                     if (pos >= 0 && pos < browserChannels.size) {
-                        // ИСПРАВЛЕНИЕ: если нажали "Вправо", мгновенно обновляем адаптер
-                        handler.removeCallbacks(updateAdapterRunnable)
                         val currentAdapter = browserListView.adapter as? ChannelAdapter
                         if (currentAdapter != null && currentAdapter.selectedPos != pos) {
                             currentAdapter.selectedPos = pos
@@ -1269,6 +1260,7 @@ class PlayerActivity : Activity() {
             rebuildZapList(keepCurrent = true)
             browserChannels = zapList
             val adapter = ChannelAdapter(this, browserChannels, showNow = true)
+            adapter.listView = browserListView
             browserListView.adapter = adapter
             if (browserChannels.isEmpty()) {
                 browserActionFocused = false
@@ -1288,7 +1280,6 @@ class PlayerActivity : Activity() {
 
     private fun cancelBrowse() {
         handler.removeCallbacks(livePreviewRunnable)
-        handler.removeCallbacks(updateAdapterRunnable)
         if (Store.livePreview && !isCatchupPlayback &&
             channelBeforeBrowse != null && currentChannel?.url != channelBeforeBrowse?.url) {
             channelBeforeBrowse?.let { play(it) }
