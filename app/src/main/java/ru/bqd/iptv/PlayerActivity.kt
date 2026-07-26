@@ -293,40 +293,31 @@ class PlayerActivity : Activity() {
         clampPanels()
     }
 
-    /**
-     * ИСПРАВЛЕННАЯ ФУНКЦИЯ РАЗМЕЩЕНИЯ ПАНЕЛЕЙ
-     * Решает проблему "замочной скважины" и дыр между блоками с помощью математического заезда панелей.
-     */
     private fun clampPanels() {
         val w = resources.displayMetrics.widthPixels
         fun dpx(v: Int) = (v * resources.displayMetrics.density).toInt()
         val railW = dpx(88)
         val railMarginStart = dpx(8)
         val railGap = dpx(18)
-        val panelLeftMargin = railMarginStart + railW + railGap   // = 114dp в px
+        val panelLeftMargin = railMarginStart + railW + railGap
 
-        // Нахлест (заезд) панелей друг под друга для скрытия углов
-        val overlapLeft = dpx(40)  // Заезд под левое меню
-        val overlapRight = dpx(60) // Заезд под среднюю панель
+        val overlapLeft = dpx(40)
+        val overlapRight = dpx(60)
 
-        // === БРАУЗЕР КАНАЛОВ ===
         val listW = minOf(dpx(540), (w * 0.62).toInt()).coerceAtLeast(dpx(240))
         (browserList.layoutParams as? FrameLayout.LayoutParams)?.let {
-            it.leftMargin = panelLeftMargin - overlapLeft // Сдвигаем влево под меню
-            it.width = listW + overlapLeft // Компенсируем ширину
+            it.leftMargin = panelLeftMargin - overlapLeft
+            it.width = listW + overlapLeft
             browserList.layoutParams = it
         }
-        // Увеличиваем внутренний отступ текста, чтобы он не уехал (база 24dp + 40dp заезд)
         browserList.setPadding(dpx(24) + overlapLeft, browserList.paddingTop, browserList.paddingRight, browserList.paddingBottom)
 
         (previewCard.layoutParams as? FrameLayout.LayoutParams)?.let {
-            it.leftMargin = panelLeftMargin + listW - overlapRight // Сдвигаем влево под список
+            it.leftMargin = panelLeftMargin + listW - overlapRight
             previewCard.layoutParams = it
         }
-        // Компенсируем текст (база 32dp + 60dp заезд)
         previewCard.setPadding(dpx(32) + overlapRight, previewCard.paddingTop, previewCard.paddingRight, previewCard.paddingBottom)
 
-        // === ЛЕВОЕ МЕНЮ И ПРАВАЯ ПАНЕЛЬ ===
         if (!menuCollapsed) {
             leftMenu.layoutParams = leftMenu.layoutParams.apply {
                 width = minOf(dpx(MENU_W_FULL), (w * 0.85).toInt())
@@ -334,27 +325,21 @@ class PlayerActivity : Activity() {
         }
         rightPanel.layoutParams = rightPanel.layoutParams.apply { width = minOf(dpx(520), (w * 0.9).toInt()) }
 
-        // === ПАНЕЛЬ НАСТРОЕК ===
         val baseSetListW = minOf(dpx(400), (w * 0.55).toInt()).coerceAtLeast(dpx(260))
 
-        // Средняя панель (список настроек)
         (setListPanel.layoutParams as? FrameLayout.LayoutParams)?.let {
-            it.leftMargin = panelLeftMargin - overlapLeft // Сдвигаем влево под меню
-            it.width = baseSetListW + overlapLeft // Компенсируем ширину
+            it.leftMargin = panelLeftMargin - overlapLeft
+            it.width = baseSetListW + overlapLeft
             setListPanel.layoutParams = it
         }
-        // Компенсируем текст (база 24dp + 40dp заезд)
         setListPanel.setPadding(dpx(24) + overlapLeft, setListPanel.paddingTop, setListPanel.paddingRight, setListPanel.paddingBottom)
 
-        // Правая панель (детали настроек)
         (setDetailScroll.layoutParams as? FrameLayout.LayoutParams)?.let {
-            it.leftMargin = panelLeftMargin + baseSetListW - overlapRight // Сдвигаем влево под среднюю панель
+            it.leftMargin = panelLeftMargin + baseSetListW - overlapRight
             setDetailScroll.layoutParams = it
         }
-        // Компенсируем текст (база 34dp + 60dp заезд)
         setDetailScroll.setPadding(dpx(34) + overlapRight, setDetailScroll.paddingTop, setDetailScroll.paddingRight, setDetailScroll.paddingBottom)
 
-        // Принудительно сбрасываем смещения, если они остались от старых правок в XML
         browserList.translationX = 0f
         previewCard.translationX = 0f
         setListPanel.translationX = 0f
@@ -419,7 +404,7 @@ class PlayerActivity : Activity() {
         when (Store.quality) {
             "stable" -> { p.setMaxVideoSize(1280, 720); p.setMaxVideoBitrate(2_800_000) }
             "max" -> { p.clearVideoSizeConstraints(); p.setMaxVideoBitrate(Int.MAX_VALUE) }
-            else -> { p.clearVideoSizeConstraints(); p.setMaxVideoBitrate(Int.MAX_VALUE) } // auto
+            else -> { p.clearVideoSizeConstraints(); p.setMaxVideoBitrate(Int.MAX_VALUE) }
         }
         player.trackSelectionParameters = p.build()
     }
@@ -1019,16 +1004,59 @@ class PlayerActivity : Activity() {
         if (isPhone && currentChannel != null) phoneBar.visibility = View.VISIBLE
     }
 
+    /** 
+     * ИСПРАВЛЕННО: Управление скрытием текста для верхних пунктов меню.
+     * Вместо скрытия всего блока мы просто отключаем текстовые поля, оставляя иконки. 
+     */
+    private fun setFixedTopCompact(compact: Boolean) {
+        if (!::leftFixedTop.isInitialized) return
+        val vis = if (compact) View.GONE else View.VISIBLE
+        
+        settingsRow.findViewById<TextView>(R.id.catName)?.visibility = vis
+        searchRow.findViewById<TextView>(R.id.catName)?.visibility = vis
+        favRow.findViewById<TextView>(R.id.catName)?.visibility = vis
+        plSelFixed.findViewById<TextView>(R.id.plSelName)?.visibility = vis
+
+        if (compact) {
+            favRowCount.visibility = View.GONE
+        } else {
+            val favCount = favoriteChannels().size
+            favRowCount.visibility = if (favCount > 0) View.VISIBLE else View.GONE
+            
+            // Сбрасываем принудительную подсветку при разворачивании меню
+            settingsRow.isSelected = false
+            settingsRow.isActivated = false
+            searchRow.isSelected = false
+            searchRow.isActivated = false
+            favRow.isSelected = false
+            favRow.isActivated = false
+            plSelFixed.findViewById<View>(R.id.plSelRow)?.apply {
+                isSelected = false
+                isActivated = false
+            }
+        }
+    }
+
+    /**
+     * ИСПРАВЛЕННО: Сворачивание левого меню.
+     * Теперь верхние служебные пункты не пропадают, а корректно сжимаются до иконок.
+     */
     private fun showRail(activeOverrideType: String? = null) {
         val wasVisible = leftMenu.visibility == View.VISIBLE
         leftMenu.visibility = View.VISIBLE
         menuCollapsed = true
-        if (::leftFixedTop.isInitialized) leftFixedTop.visibility = View.GONE
+
+        // Оставляем верхний блок видимым, скрываем только текст внутри него
+        if (::leftFixedTop.isInitialized) leftFixedTop.visibility = View.VISIBLE
+        setFixedTopCompact(true)
+
         refreshRail(activeOverrideType)
+
         catList.isFocusable = false
         catList.isFocusableInTouchMode = false
         catList.isEnabled = false
         catList.isVerticalScrollBarEnabled = false
+
         if (wasVisible) {
             animateMenuWidth(dp(MENU_W_RAIL), dp(MENU_PAD_RAIL))
         } else {
@@ -1044,7 +1072,13 @@ class PlayerActivity : Activity() {
         catList.isFocusableInTouchMode = true
         catList.isEnabled = true
         catList.isVerticalScrollBarEnabled = true
-        if (::leftFixedTop.isInitialized) leftFixedTop.visibility = View.VISIBLE
+        
+        // Разворачиваем текст обратно
+        if (::leftFixedTop.isInitialized) {
+            leftFixedTop.visibility = View.VISIBLE
+            setFixedTopCompact(false)
+        }
+        
         if (animate) animateMenuWidth(dp(MENU_W_FULL), dp(MENU_PAD_FULL))
         else setMenuWidth(dp(MENU_W_FULL), dp(MENU_PAD_FULL))
     }
@@ -1115,20 +1149,43 @@ class PlayerActivity : Activity() {
         updatePreview(browserChannels.getOrNull(start))
     }
 
+    /**
+     * ИСПРАВЛЕННО: Идеальное обновление свёрнутого состояния.
+     * Заботится о том, чтобы список содержал только группы (как до скрытия),
+     * и подсвечивает фиксированные элементы.
+     */
     private fun refreshRail(activeOverrideType: String? = null) {
         val plIdx = if (curPlaylistIdx >= 0) curPlaylistIdx else lastRealPlaylistIdx
-        val items = buildCatItems(plIdx)
+        val items = buildCatOnlyList(plIdx)
         val adapter = CategoryAdapter(this, items, compact = true)
+        
         val active = when {
-            activeOverrideType != null -> items.indexOfFirst { it.type == activeOverrideType }
-            curPlaylistIdx == -1 -> items.indexOfFirst { it.type == "FAV" }
+            activeOverrideType != null -> -1
+            curPlaylistIdx == -1 -> -1
             curCategory == null -> items.indexOfFirst { it.type == "ALL" }
             else -> items.indexOfFirst { it.type == "GROUP" && it.group == curCategory }
         }
         adapter.activePos = active
-        catItemsList = items
+        catOnlyList = items
         catList.adapter = adapter
         if (active >= 0) catList.setSelection(active)
+
+        // Подсвечиваем верхние пункты
+        val isSettings = (activeOverrideType == "SETTINGS")
+        val isSearch = (activeOverrideType == "SEARCH")
+        val isFav = (curPlaylistIdx == -1 && activeOverrideType == null) || activeOverrideType == "FAV"
+        val isPlSel = (activeOverrideType == "PLSEL")
+
+        settingsRow.isSelected = isSettings
+        settingsRow.isActivated = isSettings
+        searchRow.isSelected = isSearch
+        searchRow.isActivated = isSearch
+        favRow.isSelected = isFav
+        favRow.isActivated = isFav
+        plSelFixed.findViewById<View>(R.id.plSelRow)?.apply {
+            isSelected = isPlSel
+            isActivated = isPlSel
+        }
     }
 
     private fun setBrowserActionFocused(focused: Boolean) {
@@ -1383,9 +1440,14 @@ class PlayerActivity : Activity() {
     }
 
     private fun updateFixedTop() {
+        if (!::favRowCount.isInitialized) return
         val favCount = favoriteChannels().size
         favRowCount.text = favCount.toString()
-        favRowCount.visibility = if (favCount > 0) View.VISIBLE else View.GONE
+        if (menuCollapsed) {
+            favRowCount.visibility = View.GONE
+        } else {
+            favRowCount.visibility = if (favCount > 0) View.VISIBLE else View.GONE
+        }
         plSelFixedName.text = playlists.getOrNull(menuPlaylistIdx)?.name ?: "—"
     }
 
@@ -1413,18 +1475,6 @@ class PlayerActivity : Activity() {
         catOnlyList = buildCatOnlyList(menuPlaylistIdx)
         catList.adapter = CategoryAdapter(this, catOnlyList)
         catList.setOnItemClickListener { _, _, pos, _ -> activateCatOnly(pos) }
-    }
-
-    private fun activateCat(pos: Int) {
-        val item = catItemsList.getOrNull(pos) ?: return
-        when (item.type) {
-            "SETTINGS" -> openSettingsPanel()
-            "SEARCH" -> openSearch()
-            "FAV" -> selectFavorites()
-            "PLSEL" -> cycleMenuPlaylist(1)
-            "ALL" -> selectCategory(null)
-            "GROUP" -> selectCategory(item.group)
-        }
     }
 
     private fun selectFavorites() {
