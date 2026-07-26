@@ -123,8 +123,8 @@ class PlayerActivity : Activity() {
     private var focusResultsAfterSearch = false
     private val searchRunnable = Runnable { doSearch() }
 
-    // Дебаунс убран: ChannelAdapter теперь перерисовывает только изменённые строки,
-    // а не весь список, поэтому selectedPos можно обновлять мгновенно без дёрганья.
+    // Дебаунс убран: ChannelAdapter теперь использует INVISIBLE вместо GONE
+    // и post() для обновлений — высота строк стабильна, ListView не дёргается.
 
     private val handler = Handler(Looper.getMainLooper())
 
@@ -1125,16 +1125,14 @@ class PlayerActivity : Activity() {
         }
         browserListView.setOnItemSelectedListener(object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(p: android.widget.AdapterView<*>?, v: View?, pos: Int, id: Long) {
-                // Точечное обновление: перерисовываются только старая и новая строка,
-                // поэтому можно обновлять мгновенно без дёрганья всего списка.
                 val a = browserListView.adapter as? ChannelAdapter
-                if (a != null && a.selectedPos != pos) {
+                if (a != null) {
                     if (a.actionFocused) {
                         a.actionFocused = false
                         browserActionFocused = false
                         browserListView.setSelector(R.drawable.list_focus)
                     }
-                    a.selectedPos = pos
+                    a.selectedPos = pos   // post() внутри — безопасно
                 }
                 updatePreview(browserChannels.getOrNull(pos))
                 if (Store.livePreview) scheduleLivePreview(browserChannels.getOrNull(pos))
