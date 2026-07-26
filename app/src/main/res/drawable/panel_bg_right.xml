@@ -1,27 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- 1 слой: Ваш базовый цвет -->
-    <item>
-        <shape android:shape="rectangle">
-            <solid android:color="@color/panel" />
-            <corners
-                android:topLeftRadius="0dp"
-                android:bottomLeftRadius="0dp"
-                android:topRightRadius="16dp"
-                android:bottomRightRadius="16dp" />
-        </shape>
-    </item>
-    
-    <!-- 2 слой: Осветляющая пленка (белый цвет с прозрачностью 12%) -->
-    <item>
-        <shape android:shape="rectangle">
-            <!-- #1EFFFFFF: 1E = ~12% непрозрачности -->
-            <solid android:color="#1EFFFFFF" />
-            <corners
-                android:topLeftRadius="0dp"
-                android:bottomLeftRadius="0dp"
-                android:topRightRadius="16dp"
-                android:bottomRightRadius="16dp" />
-        </shape>
-    </item>
-</layer-list>
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <!-- Полупрозрачный цвет -->
+    <solid android:color="#CC0A1C27" />
+    <corners
+        android:topLeftRadius="0dp"
+        android:bottomLeftRadius="0dp"
+        android:topRightRadius="16dp"
+        android:bottomRightRadius="16dp" />
+</shape>
