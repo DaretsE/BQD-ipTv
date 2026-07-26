@@ -1121,7 +1121,19 @@ class PlayerActivity : Activity() {
         }
         browserListView.setOnItemSelectedListener(object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(p: android.widget.AdapterView<*>?, v: View?, pos: Int, id: Long) {
-                (browserListView.adapter as? ChannelAdapter)?.selectedPos = pos
+                // ИСПРАВЛЕНИЕ: Откладываем обновление внутреннего состояния адаптера, 
+                // чтобы не прерывать системную анимацию листания и не сбивать фокус.
+                browserListView.post {
+                    val currentAdapter = browserListView.adapter as? ChannelAdapter
+                    if (currentAdapter != null && currentAdapter.selectedPos != pos) {
+                        currentAdapter.selectedPos = pos
+                        if (currentAdapter.actionFocused) {
+                            currentAdapter.actionFocused = false
+                            browserActionFocused = false
+                            browserListView.setSelector(R.drawable.list_focus)
+                        }
+                    }
+                }
                 updatePreview(browserChannels.getOrNull(pos))
                 if (Store.livePreview) scheduleLivePreview(browserChannels.getOrNull(pos))
             }
@@ -1865,7 +1877,7 @@ class PlayerActivity : Activity() {
             .setItems(options) { _, which ->
                 Store.retryMode = values[which]
                 rebuildPlayerKeepingChannel()
-                toast("При обрыве: ${Quality.retryLabel()}")
+                toast("При обрыве: ${Quality.retryLabel()}");
             }.show()
     }
 
