@@ -1004,10 +1004,6 @@ class PlayerActivity : Activity() {
         if (isPhone && currentChannel != null) phoneBar.visibility = View.VISIBLE
     }
 
-    /** 
-     * ИСПРАВЛЕННО: Управление скрытием текста для верхних пунктов меню.
-     * Вместо скрытия всего блока мы просто отключаем текстовые поля, оставляя иконки. 
-     */
     private fun setFixedTopCompact(compact: Boolean) {
         if (!::leftFixedTop.isInitialized) return
         val vis = if (compact) View.GONE else View.VISIBLE
@@ -1015,7 +1011,11 @@ class PlayerActivity : Activity() {
         settingsRow.findViewById<TextView>(R.id.catName)?.visibility = vis
         searchRow.findViewById<TextView>(R.id.catName)?.visibility = vis
         favRow.findViewById<TextView>(R.id.catName)?.visibility = vis
-        plSelFixed.findViewById<TextView>(R.id.plSelName)?.visibility = vis
+        
+        plSelFixed.findViewById<View>(R.id.plSelName)?.visibility = vis
+        plSelFixed.findViewById<View>(R.id.plSelArrowL)?.visibility = vis
+        plSelFixed.findViewById<View>(R.id.plSelArrowR)?.visibility = vis
+        plSelFixed.findViewById<View>(R.id.plSelIcon)?.visibility = if (compact) View.VISIBLE else View.GONE
 
         if (compact) {
             favRowCount.visibility = View.GONE
@@ -1023,7 +1023,6 @@ class PlayerActivity : Activity() {
             val favCount = favoriteChannels().size
             favRowCount.visibility = if (favCount > 0) View.VISIBLE else View.GONE
             
-            // Сбрасываем принудительную подсветку при разворачивании меню
             settingsRow.isSelected = false
             settingsRow.isActivated = false
             searchRow.isSelected = false
@@ -1037,16 +1036,11 @@ class PlayerActivity : Activity() {
         }
     }
 
-    /**
-     * ИСПРАВЛЕННО: Сворачивание левого меню.
-     * Теперь верхние служебные пункты не пропадают, а корректно сжимаются до иконок.
-     */
     private fun showRail(activeOverrideType: String? = null) {
         val wasVisible = leftMenu.visibility == View.VISIBLE
         leftMenu.visibility = View.VISIBLE
         menuCollapsed = true
 
-        // Оставляем верхний блок видимым, скрываем только текст внутри него
         if (::leftFixedTop.isInitialized) leftFixedTop.visibility = View.VISIBLE
         setFixedTopCompact(true)
 
@@ -1073,7 +1067,6 @@ class PlayerActivity : Activity() {
         catList.isEnabled = true
         catList.isVerticalScrollBarEnabled = true
         
-        // Разворачиваем текст обратно
         if (::leftFixedTop.isInitialized) {
             leftFixedTop.visibility = View.VISIBLE
             setFixedTopCompact(false)
@@ -1149,11 +1142,6 @@ class PlayerActivity : Activity() {
         updatePreview(browserChannels.getOrNull(start))
     }
 
-    /**
-     * ИСПРАВЛЕННО: Идеальное обновление свёрнутого состояния.
-     * Заботится о том, чтобы список содержал только группы (как до скрытия),
-     * и подсвечивает фиксированные элементы.
-     */
     private fun refreshRail(activeOverrideType: String? = null) {
         val plIdx = if (curPlaylistIdx >= 0) curPlaylistIdx else lastRealPlaylistIdx
         val items = buildCatOnlyList(plIdx)
@@ -1170,7 +1158,6 @@ class PlayerActivity : Activity() {
         catList.adapter = adapter
         if (active >= 0) catList.setSelection(active)
 
-        // Подсвечиваем верхние пункты
         val isSettings = (activeOverrideType == "SETTINGS")
         val isSearch = (activeOverrideType == "SEARCH")
         val isFav = (curPlaylistIdx == -1 && activeOverrideType == null) || activeOverrideType == "FAV"
@@ -1407,6 +1394,12 @@ class PlayerActivity : Activity() {
         (plSelFixed as? android.view.ViewGroup)?.descendantFocusability =
             android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS
         val plSelRow = plSelFixed.findViewById<View>(R.id.plSelRow)
+        
+        val plIcon = plSelFixed.findViewById<TextView>(R.id.plSelIcon)
+        if (plIcon != null) {
+            IconFont.apply(plIcon, "featured_play_list")
+        }
+
         plSelFixed.setOnFocusChangeListener { _, hasFocus ->
             plSelRow?.isSelected = hasFocus
         }
