@@ -438,13 +438,15 @@
 
     <FrameLayout
         android:id="@+id/searchOverlay"
-        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
         android:background="@color/overlay_dark"
         android:visibility="gone">
 
       <LinearLayout
         android:id="@+id/searchContent"
-        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
         android:orientation="vertical"
         android:paddingStart="116dp" android:paddingEnd="28dp"
         android:paddingTop="52dp" android:paddingBottom="28dp">
@@ -496,22 +498,25 @@
             android:textColor="#3C5A63" android:textSize="56sp" />
     </FrameLayout>
 
+    <!-- ПАНЕЛЬ НАСТРОЕК (Идеальный математический каскад с задвиганием под панели) -->
     <FrameLayout
         android:id="@+id/settingsPanel"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:visibility="gone">
 
+        <!-- 1. ПРАВАЯ ПАНЕЛЬ (Нижний слой) -->
+        <!-- Задвинута влево на 34dp (с 514 до 480). padding увеличен на 34dp (с 34 до 68) -->
         <ScrollView
             android:id="@+id/setDetailScroll"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:layout_marginLeft="114dp"
+            android:layout_marginLeft="480dp"
             android:layout_marginRight="14dp"
             android:layout_marginTop="14dp"
             android:layout_marginBottom="14dp"
             android:background="@drawable/panel_bg_right"
-            android:paddingLeft="434dp"
+            android:paddingLeft="68dp"
             android:paddingRight="34dp"
             android:paddingTop="52dp"
             android:paddingBottom="36dp"
@@ -524,18 +529,20 @@
                 android:orientation="vertical" />
         </ScrollView>
 
+        <!-- 2. СРЕДНЯЯ ПАНЕЛЬ (Средний слой) -->
+        <!-- Задвинута влево на 40dp (с 114 до 74). Ширина и padding увеличены на 40dp -->
         <LinearLayout
             android:id="@+id/setListPanel"
-            android:layout_width="400dp"
+            android:layout_width="440dp"
             android:layout_height="match_parent"
-            android:layout_marginLeft="114dp"
+            android:layout_marginLeft="74dp"
             android:layout_marginTop="14dp"
             android:layout_marginBottom="14dp"
             android:orientation="vertical"
             android:background="@drawable/panel_bg_middle"
             android:clickable="true"
             android:focusable="true"
-            android:paddingLeft="24dp"
+            android:paddingLeft="64dp"
             android:paddingRight="16dp"
             android:paddingTop="54dp"
             android:paddingBottom="16dp">
@@ -561,35 +568,45 @@
 
             <ListView
                 android:id="@+id/setList"
-                android:layout_width="match_parent" android:layout_height="match_parent"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
                 android:listSelector="@drawable/list_focus"
                 android:drawSelectorOnTop="true"
-                android:divider="@null" android:dividerHeight="0dp"
+                android:divider="@null"
+                android:dividerHeight="0dp"
                 android:scrollbars="vertical"
                 android:scrollbarStyle="outsideOverlay"
                 android:scrollbarSize="6dp"
                 android:scrollbarThumbVertical="@drawable/scrollbar_thumb"
                 android:fadeScrollbars="false"
-                android:paddingTop="6dp" android:paddingBottom="6dp"
+                android:paddingTop="6dp"
+                android:paddingBottom="6dp"
                 android:paddingRight="8dp"
                 android:clipToPadding="false" />
         </LinearLayout>
     </FrameLayout>
 
+    <!-- 3. ЛЕВОЕ МЕНЮ (Верхний слой). Перекрывает среднюю панель -->
     <LinearLayout
         android:id="@+id/leftMenu"
-        android:layout_width="392dp" android:layout_height="match_parent"
-        android:layout_gravity="left" android:orientation="vertical"
+        android:layout_width="392dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="left"
+        android:orientation="vertical"
         android:layout_marginStart="8dp"
         android:layout_marginTop="14dp"
         android:layout_marginBottom="14dp"
         android:background="@drawable/panel_bg_left"
-        android:paddingLeft="16dp" android:paddingRight="16dp"
-        android:paddingTop="20dp" android:paddingBottom="16dp" android:visibility="gone">
+        android:paddingLeft="16dp"
+        android:paddingRight="16dp"
+        android:paddingTop="20dp"
+        android:paddingBottom="16dp"
+        android:visibility="gone">
 
         <LinearLayout
             android:id="@+id/leftFixedTop"
-            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
             android:orientation="vertical">
 
             <include layout="@layout/item_category" android:id="@+id/settingsRow"
@@ -606,27 +623,33 @@
         </LinearLayout>
 
         <ListView android:id="@+id/catList"
-            android:layout_width="match_parent" android:layout_height="0dp"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
             android:layout_weight="1"
-            android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true"
-            android:divider="@null" android:dividerHeight="0dp"
+            android:listSelector="@drawable/list_focus"
+            android:drawSelectorOnTop="true"
+            android:divider="@null"
+            android:dividerHeight="0dp"
             android:scrollbars="vertical"
             android:scrollbarStyle="outsideOverlay"
             android:scrollbarSize="6dp"
             android:scrollbarThumbVertical="@drawable/scrollbar_thumb"
             android:fadeScrollbars="false"
-            android:paddingTop="4dp" android:paddingBottom="8dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="8dp"
             android:paddingRight="4dp"
             android:clipToPadding="false" />
     </LinearLayout>
 
     <TextView
         android:id="@+id/toastView"
-        android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
         android:layout_gravity="center_horizontal|bottom"
         android:layout_marginBottom="120dp"
         android:background="@drawable/toast_bg"
-        android:textColor="@color/text" android:textSize="18sp"
+        android:textColor="@color/text"
+        android:textSize="18sp"
         android:gravity="center"
         android:maxWidth="700dp"
         android:visibility="gone" />
