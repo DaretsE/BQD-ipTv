@@ -162,59 +162,19 @@
         android:layout_gravity="center" android:background="@drawable/toast_bg"
         android:textColor="@color/text" android:textSize="18sp" android:visibility="gone" />
 
+    <!-- БРАУЗЕР КАНАЛОВ И ПРЕВЬЮ -->
     <FrameLayout
         android:id="@+id/browserOverlay"
         android:layout_width="match_parent" android:layout_height="match_parent"
         android:visibility="gone">
 
-        <LinearLayout
-            android:id="@+id/browserList"
-            android:layout_width="540dp" android:layout_height="match_parent"
-            android:layout_marginLeft="114dp"
-            android:layout_marginTop="14dp"
-            android:layout_marginBottom="14dp"
-            android:orientation="vertical" android:background="@drawable/panel_bg_left"
-            android:paddingLeft="24dp" android:paddingRight="16dp"
-            android:paddingTop="54dp" android:paddingBottom="18dp">
-
-            <TextView android:id="@+id/browserPlName"
-                android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:textColor="@color/accent2" android:textSize="12sp" android:textStyle="bold"
-                android:letterSpacing="0.12" android:alpha="0.9"
-                android:paddingLeft="4dp" android:paddingRight="4dp" android:paddingBottom="6dp"
-                android:singleLine="true" android:ellipsize="end" />
-
-            <TextView android:id="@+id/browserHeader"
-                android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:textColor="#FFFFFFFF" android:textSize="22sp" android:textStyle="bold"
-                android:paddingLeft="4dp" android:paddingRight="4dp"
-                android:paddingTop="6dp" android:paddingBottom="8dp"
-                android:singleLine="true" android:ellipsize="end" />
-
-            <View
-                android:layout_width="40dp" android:layout_height="3dp"
-                android:layout_marginLeft="4dp" android:layout_marginBottom="12dp"
-                android:background="@drawable/hdr_underline" />
-
-            <ListView android:id="@+id/browserListView"
-                android:layout_width="match_parent" android:layout_height="match_parent"
-                android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true"
-                android:divider="@null" android:dividerHeight="0dp"
-                android:scrollbars="vertical"
-                android:scrollbarStyle="outsideOverlay"
-                android:scrollbarSize="6dp"
-                android:scrollbarThumbVertical="@drawable/scrollbar_thumb"
-                android:fadeScrollbars="false"
-                android:paddingTop="6dp" android:paddingBottom="6dp"
-                android:paddingRight="8dp"
-                android:clipToPadding="false" />
-        </LinearLayout>
-
+        <!-- 1. ПРЕВЬЮ КАРТОЧКА (Нижний слой). Рисуется первой, прячется под списком каналов -->
+        <!-- Поменяли фон на новый градиент слева-направо -->
         <LinearLayout
             android:id="@+id/previewCard"
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_gravity="bottom" android:layout_marginLeft="654dp"
-            android:orientation="vertical" android:background="@drawable/osd_bg"
+            android:orientation="vertical" android:background="@drawable/preview_bg"
             android:paddingLeft="32dp" android:paddingRight="32dp"
             android:paddingTop="44dp" android:paddingBottom="26dp">
 
@@ -256,6 +216,51 @@
                 android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:layout_marginTop="10dp" android:textColor="@color/text_dim" android:textSize="14sp"
                 android:singleLine="true" android:ellipsize="end" />
+        </LinearLayout>
+
+        <!-- 2. СПИСОК КАНАЛОВ (Средний слой). Рисуется вторым, ложится поверх превью -->
+        <!-- Поменяли фон на panel_bg_middle (#193A4E), чтобы совпадал с настройками -->
+        <LinearLayout
+            android:id="@+id/browserList"
+            android:layout_width="540dp" android:layout_height="match_parent"
+            android:layout_marginLeft="114dp"
+            android:layout_marginTop="14dp"
+            android:layout_marginBottom="14dp"
+            android:orientation="vertical" android:background="@drawable/panel_bg_middle"
+            android:paddingLeft="24dp" android:paddingRight="16dp"
+            android:paddingTop="54dp" android:paddingBottom="18dp">
+
+            <TextView android:id="@+id/browserPlName"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:textColor="@color/accent2" android:textSize="12sp" android:textStyle="bold"
+                android:letterSpacing="0.12" android:alpha="0.9"
+                android:paddingLeft="4dp" android:paddingRight="4dp" android:paddingBottom="6dp"
+                android:singleLine="true" android:ellipsize="end" />
+
+            <TextView android:id="@+id/browserHeader"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:textColor="#FFFFFFFF" android:textSize="22sp" android:textStyle="bold"
+                android:paddingLeft="4dp" android:paddingRight="4dp"
+                android:paddingTop="6dp" android:paddingBottom="8dp"
+                android:singleLine="true" android:ellipsize="end" />
+
+            <View
+                android:layout_width="40dp" android:layout_height="3dp"
+                android:layout_marginLeft="4dp" android:layout_marginBottom="12dp"
+                android:background="@drawable/hdr_underline" />
+
+            <ListView android:id="@+id/browserListView"
+                android:layout_width="match_parent" android:layout_height="match_parent"
+                android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true"
+                android:divider="@null" android:dividerHeight="0dp"
+                android:scrollbars="vertical"
+                android:scrollbarStyle="outsideOverlay"
+                android:scrollbarSize="6dp"
+                android:scrollbarThumbVertical="@drawable/scrollbar_thumb"
+                android:fadeScrollbars="false"
+                android:paddingTop="6dp" android:paddingBottom="6dp"
+                android:paddingRight="8dp"
+                android:clipToPadding="false" />
         </LinearLayout>
     </FrameLayout>
 
@@ -498,16 +503,13 @@
             android:textColor="#3C5A63" android:textSize="56sp" />
     </FrameLayout>
 
-    <!-- ИДЕАЛЬНЫЙ КАСКАД: Использование translationX для обхода Kotlin-ограничений -->
+    <!-- ПАНЕЛЬ НАСТРОЕК -->
     <FrameLayout
         android:id="@+id/settingsPanel"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:visibility="gone">
 
-        <!-- 1. ПРАВЫЙ БЛОК (САМЫЙ НИЖНИЙ СЛОЙ) -->
-        <!-- translationX="-60dp" принудительно задвигает блок под средний после того, как Kotlin его нарисует -->
-        <!-- paddingLeft="94dp" (34 базовых + 60 сдвиг) удерживает контент ровно на своем месте -->
         <ScrollView
             android:id="@+id/setDetailScroll"
             android:layout_width="match_parent"
@@ -531,9 +533,6 @@
                 android:orientation="vertical" />
         </ScrollView>
 
-        <!-- 2. СРЕДНИЙ БЛОК (СРЕДНИЙ СЛОЙ) -->
-        <!-- translationX="-40dp" принудительно задвигает блок под левое меню -->
-        <!-- paddingLeft="64dp" (24 базовых + 40 сдвиг) удерживает текст на старом месте -->
         <LinearLayout
             android:id="@+id/setListPanel"
             android:layout_width="400dp"
@@ -590,7 +589,7 @@
         </LinearLayout>
     </FrameLayout>
 
-    <!-- 3. ЛЕВОЕ МЕНЮ (САМЫЙ ВЕРХНИЙ СЛОЙ). Ложится поверх сдвинутого среднего блока -->
+    <!-- ЛЕВОЕ МЕНЮ (Самый верхний слой) -->
     <LinearLayout
         android:id="@+id/leftMenu"
         android:layout_width="392dp"
