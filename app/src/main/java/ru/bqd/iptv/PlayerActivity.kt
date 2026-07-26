@@ -123,7 +123,8 @@ class PlayerActivity : Activity() {
     private var focusResultsAfterSearch = false
     private val searchRunnable = Runnable { doSearch() }
 
-    // --- ИСПРАВЛЕНИЕ: Отложенное обновление адаптера ---
+    // --- ИСПРАВЛЕНИЕ СКРОЛЛА: Отложенное обновление адаптера (Debounce) ---
+    // Это не дает адаптеру перерисовывать список во время плавной прокрутки.
     private var pendingAdapterPos = -1
     private val updateAdapterRunnable = Runnable {
         val currentAdapter = browserListView.adapter as? ChannelAdapter
@@ -1135,12 +1136,12 @@ class PlayerActivity : Activity() {
         }
         browserListView.setOnItemSelectedListener(object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(p: android.widget.AdapterView<*>?, v: View?, pos: Int, id: Long) {
-                // --- ИСПРАВЛЕНИЕ: Отложенное обновление (Debounce) ---
-                // Даем списку время на плавную системную анимацию прокрутки (150 мс),
-                // чтобы notifyDataSetChanged() не разрушил список прямо во время движения.
+                // --- ИСПРАВЛЕНИЕ СКРОЛЛА ---
+                // Мы больше не "дергаем" адаптер прямо во время переключения фокуса,
+                // чтобы не убить анимацию списка. Мы ждем 250 мс.
                 pendingAdapterPos = pos
                 handler.removeCallbacks(updateAdapterRunnable)
-                handler.postDelayed(updateAdapterRunnable, 150)
+                handler.postDelayed(updateAdapterRunnable, 250)
                 
                 updatePreview(browserChannels.getOrNull(pos))
                 if (Store.livePreview) scheduleLivePreview(browserChannels.getOrNull(pos))
@@ -1209,6 +1210,12 @@ class PlayerActivity : Activity() {
             KeyEvent.KEYCODE_DPAD_RIGHT -> {
                 if (!browserActionFocused) {
                     if (pos >= 0 && pos < browserChannels.size) {
+                        // ИСПРАВЛЕНИЕ: если нажали "Вправо", мгновенно обновляем адаптер
+                        handler.removeCallbacks(updateAdapterRunnable)
+                        val currentAdapter = browserListView.adapter as? ChannelAdapter
+                        if (currentAdapter != null && currentAdapter.selectedPos != pos) {
+                            currentAdapter.selectedPos = pos
+                        }
                         setBrowserActionFocused(true)
                     }
                 } else {
@@ -1289,6 +1296,10 @@ class PlayerActivity : Activity() {
         closeWithRailOut(browserList, previewCard) { closePanels() }
     }
 
+    // ИСПРАВЛЕНИЕ: Мы жестко фиксируем высоту правой панели,
+    // заменяя View.GONE на View.INVISIBLE и пробел " ".
+    // Теперь правая карточка не скачет по высоте при скрытии элементов, 
+    // и это не сбивает прокрутку списка каналов.
     private fun updatePreview(ch: Channel?) {
         if (ch == null) return
         prevName.text = ch.name
@@ -1305,9 +1316,10 @@ class PlayerActivity : Activity() {
         } else {
             prevNow.text = if (EpgManager.loading) "Программа загружается…" else "Нет данных о передаче"
             prevProgress.visibility = View.INVISIBLE
-            prevRemain.visibility = View.GONE
+            prevRemain.text = " "
+            prevRemain.visibility = View.INVISIBLE
         }
-        prevNext.text = if (next != null) "Далее: ${timeFmt.format(Date(next.start))} ${next.title}" else ""
+        prevNext.text = if (next != null) "Далее: ${timeFmt.format(Date(next.start))} ${next.title}" else " "
     }
 
     private fun scheduleLivePreview(ch: Channel?) {
