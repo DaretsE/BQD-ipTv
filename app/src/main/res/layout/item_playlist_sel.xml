@@ -1,20 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-    Строка выбора плейлиста в левом меню (#plSel в прототипе).
-    Таблетка со свечением, стрелки ‹ › по бокам и разделительная линия
-    сверху — она отделяет верхний блок (Настройки / Поиск / Избранное)
-    от списка категорий. Подпись «смена плейлиста» убрана: она перегружала
-    меню и мешала подтянуть список категорий ближе к таблетке (правка из
-    прототипа: `.list padding-top: 6px`). Тот же эффект здесь даёт
-    paddingBottom=6dp у контейнера строки.
--->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
     android:paddingBottom="6dp">
 
-    <!-- разделитель под верхним блоком -->
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"
@@ -36,6 +26,16 @@
         android:paddingTop="14dp"
         android:paddingBottom="14dp"
         android:minHeight="56dp">
+
+        <!-- Новая иконка для свернутого состояния (по умолчанию скрыта) -->
+        <TextView
+            android:id="@+id/plSelIcon"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:textColor="@color/accent2"
+            android:textSize="24sp"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/plSelArrowL"
