@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <!-- Полупрозрачный цвет (CC = ~80%) -->
-    <solid android:color="#CC0A1C27" />
+    <solid android:color="#22465C" />
     <corners
         android:topLeftRadius="0dp"
         android:bottomLeftRadius="0dp"

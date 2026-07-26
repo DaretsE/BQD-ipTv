@@ -498,25 +498,25 @@
             android:textColor="#3C5A63" android:textSize="56sp" />
     </FrameLayout>
 
-    <!-- ПАНЕЛЬ НАСТРОЕК (Идеальный математический каскад с задвиганием под панели) -->
+    <!-- ПАНЕЛЬ НАСТРОЕК (Многослойный каскад с глубоким перекрытием слоев) -->
     <FrameLayout
         android:id="@+id/settingsPanel"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:visibility="gone">
 
-        <!-- 1. ПРАВАЯ ПАНЕЛЬ (Нижний слой) -->
-        <!-- Задвинута влево на 34dp (с 514 до 480). padding увеличен на 34dp (с 34 до 68) -->
+        <!-- 1. ПРАВАЯ ПАНЕЛЬ (Нижний слой). Отрисовывается первой, уходит в самый низ. -->
+        <!-- margin сдвинут влево на 60dp (с 514 до 454). padding слева увеличен ровно на 60dp -->
         <ScrollView
             android:id="@+id/setDetailScroll"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:layout_marginLeft="480dp"
+            android:layout_marginLeft="454dp"
             android:layout_marginRight="14dp"
             android:layout_marginTop="14dp"
             android:layout_marginBottom="14dp"
             android:background="@drawable/panel_bg_right"
-            android:paddingLeft="68dp"
+            android:paddingLeft="94dp"
             android:paddingRight="34dp"
             android:paddingTop="52dp"
             android:paddingBottom="36dp"
@@ -529,20 +529,20 @@
                 android:orientation="vertical" />
         </ScrollView>
 
-        <!-- 2. СРЕДНЯЯ ПАНЕЛЬ (Средний слой) -->
-        <!-- Задвинута влево на 40dp (с 114 до 74). Ширина и padding увеличены на 40dp -->
+        <!-- 2. СРЕДНЯЯ ПАНЕЛЬ (Верхний слой для правой, но нижний для главного меню). -->
+        <!-- Сдвинута на 60dp влево (до 54dp). Ширина и padding увеличены на 60dp для компенсации -->
         <LinearLayout
             android:id="@+id/setListPanel"
-            android:layout_width="440dp"
+            android:layout_width="460dp"
             android:layout_height="match_parent"
-            android:layout_marginLeft="74dp"
+            android:layout_marginLeft="54dp"
             android:layout_marginTop="14dp"
             android:layout_marginBottom="14dp"
             android:orientation="vertical"
             android:background="@drawable/panel_bg_middle"
             android:clickable="true"
             android:focusable="true"
-            android:paddingLeft="64dp"
+            android:paddingLeft="84dp"
             android:paddingRight="16dp"
             android:paddingTop="54dp"
             android:paddingBottom="16dp">
@@ -586,7 +586,7 @@
         </LinearLayout>
     </FrameLayout>
 
-    <!-- 3. ЛЕВОЕ МЕНЮ (Верхний слой). Перекрывает среднюю панель -->
+    <!-- 3. ЛЕВОЕ МЕНЮ (Самый верхний слой). Отрисовывается последним и ложится поверх всего. -->
     <LinearLayout
         android:id="@+id/leftMenu"
         android:layout_width="392dp"
