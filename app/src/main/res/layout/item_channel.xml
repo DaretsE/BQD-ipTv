@@ -4,17 +4,18 @@
     номер (42dp) • логотип 58x42 r10 • [название + передача В ОДНУ СТРОКУ, отступ 9dp]
     • звезда текущего канала • квадратная кнопка действия 44dp справа.
     Кнопка нейтральная (card-bg + hairline) и подсвечивается только в фокусе.
+
+    ИСПРАВЛЕНИЕ: фиксированная высота 64dp — строка не меняет размер при
+    появлении/скрытии кнопки действия, и ListView не дёргается при скролле.
+    Кнопка по умолчанию INVISIBLE (а не GONE), чтобы не менять layout.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
+    android:layout_height="64dp"
     android:orientation="horizontal"
     android:gravity="center_vertical"
     android:paddingLeft="12dp"
-    android:paddingRight="10dp"
-    android:paddingTop="10dp"
-    android:paddingBottom="10dp"
-    android:minHeight="56dp">
+    android:paddingRight="10dp">
 
     <TextView
         android:id="@+id/rowNum"
@@ -84,5 +85,5 @@
         android:textColor="@color/rowbtn_icon"
         android:textSize="20sp"
         android:includeFontPadding="false"
-        android:visibility="gone" />
+        android:visibility="invisible" />
 </LinearLayout>
