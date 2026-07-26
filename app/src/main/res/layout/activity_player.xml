@@ -498,24 +498,26 @@
             android:textColor="#3C5A63" android:textSize="56sp" />
     </FrameLayout>
 
-    <!-- ПАНЕЛЬ НАСТРОЕК (Многослойный каскад с глубоким перекрытием слоев) -->
+    <!-- ИДЕАЛЬНЫЙ КАСКАД: Использование translationX для обхода Kotlin-ограничений -->
     <FrameLayout
         android:id="@+id/settingsPanel"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:visibility="gone">
 
-        <!-- 1. ПРАВАЯ ПАНЕЛЬ (Нижний слой). Отрисовывается первой, уходит в самый низ. -->
-        <!-- margin сдвинут влево на 60dp (с 514 до 454). padding слева увеличен ровно на 60dp -->
+        <!-- 1. ПРАВЫЙ БЛОК (САМЫЙ НИЖНИЙ СЛОЙ) -->
+        <!-- translationX="-60dp" принудительно задвигает блок под средний после того, как Kotlin его нарисует -->
+        <!-- paddingLeft="94dp" (34 базовых + 60 сдвиг) удерживает контент ровно на своем месте -->
         <ScrollView
             android:id="@+id/setDetailScroll"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:layout_marginLeft="454dp"
+            android:layout_marginLeft="494dp"
             android:layout_marginRight="14dp"
             android:layout_marginTop="14dp"
             android:layout_marginBottom="14dp"
             android:background="@drawable/panel_bg_right"
+            android:translationX="-60dp"
             android:paddingLeft="94dp"
             android:paddingRight="34dp"
             android:paddingTop="52dp"
@@ -529,20 +531,22 @@
                 android:orientation="vertical" />
         </ScrollView>
 
-        <!-- 2. СРЕДНЯЯ ПАНЕЛЬ (Верхний слой для правой, но нижний для главного меню). -->
-        <!-- Сдвинута на 60dp влево (до 54dp). Ширина и padding увеличены на 60dp для компенсации -->
+        <!-- 2. СРЕДНИЙ БЛОК (СРЕДНИЙ СЛОЙ) -->
+        <!-- translationX="-40dp" принудительно задвигает блок под левое меню -->
+        <!-- paddingLeft="64dp" (24 базовых + 40 сдвиг) удерживает текст на старом месте -->
         <LinearLayout
             android:id="@+id/setListPanel"
-            android:layout_width="460dp"
+            android:layout_width="400dp"
             android:layout_height="match_parent"
-            android:layout_marginLeft="54dp"
+            android:layout_marginLeft="114dp"
             android:layout_marginTop="14dp"
             android:layout_marginBottom="14dp"
             android:orientation="vertical"
             android:background="@drawable/panel_bg_middle"
+            android:translationX="-40dp"
             android:clickable="true"
             android:focusable="true"
-            android:paddingLeft="84dp"
+            android:paddingLeft="64dp"
             android:paddingRight="16dp"
             android:paddingTop="54dp"
             android:paddingBottom="16dp">
@@ -586,7 +590,7 @@
         </LinearLayout>
     </FrameLayout>
 
-    <!-- 3. ЛЕВОЕ МЕНЮ (Самый верхний слой). Отрисовывается последним и ложится поверх всего. -->
+    <!-- 3. ЛЕВОЕ МЕНЮ (САМЫЙ ВЕРХНИЙ СЛОЙ). Ложится поверх сдвинутого среднего блока -->
     <LinearLayout
         android:id="@+id/leftMenu"
         android:layout_width="392dp"

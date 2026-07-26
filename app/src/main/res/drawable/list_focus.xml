@@ -1,17 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    
-    <!-- Голубоватая полупрозрачная заливка внутри выделения. 
-         (4D в начале означает прозрачность ~30%. Если родная заливка 
-         была чуть другого оттенка, вы можете скорректировать здесь цвет) -->
-    <solid android:color="#4D5C8EA6" /> 
-    
-    <!-- Новая одинарная обводка нужного цвета -->
-    <stroke
-        android:width="2dp"
-        android:color="#5C8EA6" />
-        
-    <!-- Небольшое скругление самой рамки выделения для эстетики -->
-    <corners android:radius="12dp" /> 
-    
-</shape>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 1. Состояние: Пункт ВЫДЕЛЕН пультом -->
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <!-- Голубоватая полупрозрачная заливка -->
+            <solid android:color="#4D5C8EA6" /> 
+            <!-- Одинарная обводка нужного цвета -->
+            <stroke android:width="2dp" android:color="#5C8EA6" />
+            <corners android:radius="12dp" />
+        </shape>
+    </item>
+
+    <!-- 2. Состояние: Кнопка НАЖАТА -->
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#665C8EA6" /> 
+            <stroke android:width="2dp" android:color="#5C8EA6" />
+            <corners android:radius="12dp" />
+        </shape>
+    </item>
+
+    <!-- 3. ОБЫЧНОЕ состояние (когда фокуса нет) -->
+    <!-- Делаем фон полностью прозрачным, чтобы обводка исчезала -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@android:color/transparent" />
+        </shape>
+    </item>
+
+</selector>
