@@ -44,11 +44,10 @@ class ChannelAdapter(
             if (field == v) return
             val old = field
             field = v
-            // post — чтобы обновление не попало внутрь layout-пасса ListView
-            listView?.post {
-                refreshPosition(old)
-                refreshPosition(v)
-            }
+            // Синхронно: высота строки фиксирована (64dp), кнопка INVISIBLE/VISIBLE
+            // не меняет layout → безопасно обновлять прямо здесь, без задержки.
+            refreshPosition(old)
+            refreshPosition(v)
         }
 
     /** Фокус переведён на кнопку действия выделенной строки. */
@@ -56,7 +55,7 @@ class ChannelAdapter(
         set(v) {
             if (field == v) return
             field = v
-            listView?.post { refreshPosition(selectedPos) }
+            refreshPosition(selectedPos)
         }
 
     /**
