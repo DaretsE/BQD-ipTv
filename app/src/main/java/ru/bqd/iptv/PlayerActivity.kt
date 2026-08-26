@@ -123,8 +123,8 @@ class PlayerActivity : Activity() {
     private var focusResultsAfterSearch = false
     private val searchRunnable = Runnable { doSearch() }
 
-    // Дебаунс убран: ChannelAdapter теперь использует INVISIBLE вместо GONE
-    // и post() для обновлений — высота строк стабильна, ListView не дёргается.
+    // Дебаунс убран: ChannelAdapter использует INVISIBLE вместо GONE
+    // и точечную перерисовку — высота строк стабильна, ListView не дёргается.
 
     private val handler = Handler(Looper.getMainLooper())
 
@@ -616,14 +616,54 @@ class PlayerActivity : Activity() {
 
     private fun restoreLastChannel() {
         val last = Store.lastChannelUrl
+        val savedPl = Store.lastPlaylistIdx
+        val savedCat = Store.lastCategory.takeIf { it.isNotEmpty() }
+
+        // 1. Ищем канал во всех плейлистах (нужен как запасной вариант)
         var found: Channel? = null
-        var plIdx = 0
+        var foundPlIdx = 0
         for ((i, pl) in playlists.withIndex()) {
             val c = pl.channels.firstOrNull { it.url == last }
-            if (c != null) { found = c; plIdx = i; break }
+            if (c != null) { found = c; foundPlIdx = i; break }
         }
-        curPlaylistIdx = plIdx
-        curCategory = null
+
+        // 2. Пытаемся восстановить сохранённый контекст, проверяя что он ещё валиден
+        var restored = false
+        if (savedPl == -1) {
+            // «Избранное» — валидно, если канал всё ещё в избранном
+            if (last.isNotEmpty() && Store.isFavorite(last)) {
+                curPlaylistIdx = -1
+                curCategory = null
+                restored = true
+            }
+        } else if (savedPl >= 0 && savedPl < playlists.size) {
+            val pl = playlists[savedPl]
+            if (savedCat == null) {
+                // «Все каналы» этого плейлиста — валидно, если канал в нём есть
+                if (pl.channels.any { it.url == last }) {
+                    curPlaylistIdx = savedPl
+                    curCategory = null
+                    restored = true
+                }
+            } else {
+                // Конкретная группа — валидна, если группа существует и канал в ней
+                if (pl.channels.any { it.group == savedCat && it.url == last }) {
+                    curPlaylistIdx = savedPl
+                    curCategory = savedCat
+                    lastRealPlaylistIdx = savedPl
+                    restored = true
+                }
+            }
+        }
+
+        // 3. Контекст не восстановился (плейлист удалён, канал пропал из группы
+        //    или это первый запуск) — откатываемся к плейлисту, где нашёлся канал
+        if (!restored) {
+            curPlaylistIdx = foundPlIdx
+            curCategory = null
+            if (foundPlIdx >= 0) lastRealPlaylistIdx = foundPlIdx
+        }
+
         rebuildZapList(keepCurrent = false)
         val target = found ?: zapList.firstOrNull() ?: return
         zapIndex = zapList.indexOf(target).coerceAtLeast(0)
@@ -664,7 +704,9 @@ class PlayerActivity : Activity() {
         player.setMediaItem(Quality.mediaItem(ch.url))
         player.prepare()
         player.play()
-        Store.lastChannelUrl = ch.url
+        // Сохраняем не только канал, но и контекст (плейлист + группа),
+        // чтобы после перезапуска «Влево» вело в ту же группу, а не в «Все каналы».
+        Store.saveWatchContext(ch.url, curPlaylistIdx, curCategory)
         Store.bumpCount(ch.url)
         showOsd(ch)
     }
@@ -1132,7 +1174,7 @@ class PlayerActivity : Activity() {
                         browserActionFocused = false
                         browserListView.setSelector(R.drawable.list_focus)
                     }
-                    a.selectedPos = pos   // post() внутри — безопасно
+                    a.selectedPos = pos
                 }
                 updatePreview(browserChannels.getOrNull(pos))
                 if (Store.livePreview) scheduleLivePreview(browserChannels.getOrNull(pos))

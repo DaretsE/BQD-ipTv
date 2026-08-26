@@ -168,6 +168,31 @@ object Store {
         get() = prefs.getString("last_channel", "") ?: ""
         set(v) { prefs.edit().putString("last_channel", v).apply() }
 
+    /**
+     * Индекс плейлиста, в контексте которого смотрели последний канал.
+     * -1 — «Избранное». Значение -2 означает «не сохранено» (первый запуск).
+     */
+    var lastPlaylistIdx: Int
+        get() = prefs.getInt("last_playlist_idx", -2)
+        set(v) { prefs.edit().putInt("last_playlist_idx", v).apply() }
+
+    /**
+     * Группа (категория), в контексте которой смотрели последний канал.
+     * Пустая строка — «Все каналы» (curCategory == null).
+     */
+    var lastCategory: String
+        get() = prefs.getString("last_category", "") ?: ""
+        set(v) { prefs.edit().putString("last_category", v).apply() }
+
+    /** Сохранить весь контекст просмотра одной операцией. */
+    fun saveWatchContext(url: String, plIdx: Int, category: String?) {
+        prefs.edit()
+            .putString("last_channel", url)
+            .putInt("last_playlist_idx", plIdx)
+            .putString("last_category", category ?: "")
+            .apply()
+    }
+
     var bufferSec: Int
         get() = prefs.getInt("buffer_sec", 15)
         set(v) { prefs.edit().putInt("buffer_sec", v).apply() }

@@ -21,13 +21,14 @@ import android.widget.TextView
  * эмулируется: PlayerActivity выставляет actionFocused, а адаптер рисует
  * подсветку через state_activated.
  *
- * ИСПРАВЛЕНИЕ СКРОЛЛА:
+ * ИСПРАВЛЕНИЯ СКРОЛЛА:
  *  1. ViewHolder — убраны повторные findViewById на каждый getView.
  *  2. rowAction — INVISIBLE вместо GONE: строка всегда 64dp, layout не
  *     пересчитывается при смене выделения → нет дёрганья.
- *  3. selectedPos/actionFocused — обновляют только затронутые строки через
- *     post(), чтобы не пересекаться с layout-пассом ListView → нет
- *     «залипания» на последнем видимом пункте.
+ *  3. Точечная перерисовка только затронутых строк (refreshPosition)
+ *     вместо notifyDataSetChanged() → ListView не пересоздаёт весь список.
+ *  4. Обновление синхронное (без post) → кнопка меняется в тот же кадр,
+ *     что и выделение, без запаздывания.
  */
 class ChannelAdapter(
     private val ctx: Context,

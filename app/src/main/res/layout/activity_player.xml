@@ -248,7 +248,6 @@
                 android:background="@drawable/hdr_underline" />
 
             <!-- ИСПРАВЛЕНИЕ СКОРОСТИ ЛИСТАНИЯ: layout_height="0dp", layout_weight="1" -->
-            <!-- ИСПРАВЛЕНИЕ МЕРЦАНИЯ: scrollingCache=false, cacheColorHint=transparent -->
             <ListView android:id="@+id/browserListView"
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
@@ -321,10 +320,10 @@
             android:layout_height="0dp"
             android:layout_weight="1"
             android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true" android:divider="@color/hairline" android:dividerHeight="1dp"
-            android:scrollingCache="false"
-            android:animationCache="false"
-            android:cacheColorHint="@android:color/transparent"
-            android:overScrollMode="never" />
+                android:scrollingCache="false"
+                android:animationCache="false"
+                android:cacheColorHint="@android:color/transparent"
+                android:overScrollMode="never" />
     </LinearLayout>
 
     <LinearLayout
@@ -502,10 +501,10 @@
             android:layout_weight="1"
             android:listSelector="@drawable/list_focus" android:drawSelectorOnTop="true" android:divider="@color/hairline" android:dividerHeight="1dp"
             android:scrollbars="none"
-            android:scrollingCache="false"
-            android:animationCache="false"
-            android:cacheColorHint="@android:color/transparent"
-            android:overScrollMode="never" />
+                android:scrollingCache="false"
+                android:animationCache="false"
+                android:cacheColorHint="@android:color/transparent"
+                android:overScrollMode="never" />
       </LinearLayout>
     </FrameLayout>
 
@@ -658,10 +657,10 @@
             android:scrollbarThumbVertical="@drawable/scrollbar_thumb"
             android:fadeScrollbars="false"
             android:paddingRight="4dp"
-            android:scrollingCache="false"
-            android:animationCache="false"
-            android:cacheColorHint="@android:color/transparent"
-            android:overScrollMode="never" />
+                android:scrollingCache="false"
+                android:animationCache="false"
+                android:cacheColorHint="@android:color/transparent"
+                android:overScrollMode="never" />
     </LinearLayout>
 
     <TextView
