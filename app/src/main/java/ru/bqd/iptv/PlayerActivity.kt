@@ -355,6 +355,8 @@ class PlayerActivity : Activity() {
             .setLoadControl(Quality.loadControl())
             .setRenderersFactory(Quality.renderersFactory(this))
             .setMediaSourceFactory(Quality.mediaSourceFactory(this))
+            // не наращивать отставание от эфира после каждого перебуфера
+            .setLivePlaybackSpeedControl(Quality.livePlaybackSpeedControl())
             .build()
         playerView.player = player
         player.playWhenReady = true
@@ -365,7 +367,12 @@ class PlayerActivity : Activity() {
                 if (state == Player.STATE_READY) {
                     errorStreak = 0
                     errorMsg.visibility = View.GONE
-                    applyAutoFrameRate()
+                    // Автофреймрейт — один раз на канал. Раньше он дёргался на КАЖДОМ
+                    // переходе в READY, то есть после каждого перебуфера: смена режима
+                    // экрана пересоздаёт поверхность, декодер перезапускается, плеер
+                    // снова уходит в буферизацию — замкнутый круг подвисаний.
+                    val key = currentChannel?.url
+                    if (afrAppliedFor != key) { afrAppliedFor = key; applyAutoFrameRate() }
                 }
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -376,7 +383,11 @@ class PlayerActivity : Activity() {
         playerReleased = false
     }
 
+    /** Для какого канала уже применён автофреймрейт (чтобы не дёргать режим экрана постоянно). */
+    private var afrAppliedFor: String? = null
+
     private fun releasePlayerInternal() {
+        stopWatchdog()
         if (!::player.isInitialized) return
         try {
             playerView.player = null
@@ -447,6 +458,8 @@ class PlayerActivity : Activity() {
 
     override fun onStop() {
         super.onStop()
+        stopWatchdog()
+        handler.removeCallbacks(reconnectRunnable)
         if (!isFinishing && !playerReleased) {
             try { player.release() } catch (_: Exception) {}
             playerReleased = true
@@ -456,6 +469,7 @@ class PlayerActivity : Activity() {
     override fun onDestroy() {
         Quality.resetFrameRate(this)
         super.onDestroy()
+        stopWatchdog()
         handler.removeCallbacksAndMessages(null)
         try { webServer?.stop() } catch (_: Exception) { }
         if (!playerReleased) try { player.release() } catch (_: Exception) {}
@@ -699,11 +713,14 @@ class PlayerActivity : Activity() {
         }
         isCatchupPlayback = false
         currentChannel = ch
+        afrAppliedFor = null
         errorMsg.visibility = View.GONE
         handler.removeCallbacks(errorZapRunnable)
+        handler.removeCallbacks(reconnectRunnable)
         player.setMediaItem(Quality.mediaItem(ch.url))
         player.prepare()
         player.play()
+        startWatchdog()
         // Сохраняем не только канал, но и контекст (плейлист + группа),
         // чтобы после перезапуска «Влево» вело в ту же группу, а не в «Все каналы».
         Store.saveWatchContext(ch.url, curPlaylistIdx, curCategory)
@@ -714,8 +731,11 @@ class PlayerActivity : Activity() {
     private fun playCatchup(ch: Channel, url: String, title: String) {
         if (playerReleased) buildPlayer()
         isCatchupPlayback = true
+        // архивная запись — не живой эфир: сторож прыгал бы в её начало, поэтому выключаем
+        stopWatchdog()
         errorMsg.visibility = View.GONE
         handler.removeCallbacks(errorZapRunnable)
+        handler.removeCallbacks(reconnectRunnable)
         player.setMediaItem(MediaItem.fromUri(url))
         player.prepare()
         player.play()
@@ -748,6 +768,18 @@ class PlayerActivity : Activity() {
 
     private fun handleStreamError() {
         errorStreak++
+        // Первые две ошибки на канале — тихое переподключение к тому же источнику.
+        // Обрыв сегмента на живом эфире — вещь обыденная, и уводить зрителя на
+        // соседний канал из-за неё не нужно: обычно поток возвращается сам.
+        val ch = currentChannel
+        if (ch != null && !isCatchupPlayback && softRetries < 2) {
+            softRetries++
+            errorMsg.visibility = View.GONE
+            handler.removeCallbacks(errorZapRunnable)
+            handler.removeCallbacks(reconnectRunnable)
+            handler.postDelayed(reconnectRunnable, 1200L * softRetries)
+            return
+        }
         if (errorStreak > maxOf(6, zapList.size)) {
             errorMsg.text = "Не удаётся воспроизвести каналы.\nПроверьте подключение к интернету."
             errorMsg.visibility = View.VISIBLE
@@ -759,9 +791,182 @@ class PlayerActivity : Activity() {
         handler.postDelayed(errorZapRunnable, 3000)
     }
 
+    /** Переподключение к текущему каналу: без смены канала и без пересоздания плеера. */
+    private val reconnectRunnable = Runnable {
+        val ch = currentChannel
+        if (ch != null && !isCatchupPlayback) {
+            if (playerReleased) buildPlayer()
+            try {
+                player.setMediaItem(Quality.mediaItem(ch.url))
+                player.prepare()
+                player.play()
+            } catch (_: Throwable) { }
+        }
+    }
+
     private val errorZapRunnable = Runnable {
         errorMsg.visibility = View.GONE
         if (panel == Panel.NONE && zapList.isNotEmpty()) zap(1)
+    }
+
+    // ------------------------------------------------------------ сторож подвисаний
+    //
+    // Зачем он нужен. ExoPlayer сообщает об ОШИБКЕ только когда соединение реально
+    // рвётся или истекает таймаут чтения. Если IPTV-сервер держит сокет открытым, но
+    // отдаёт данные медленнее реального времени (обычная картина на слабом канале),
+    // плеер молча уходит в STATE_BUFFERING и остаётся там сколько угодно долго:
+    // onPlayerError не срабатывает, handleStreamError не вызывается, картинка стоит.
+    // Пользователь видит именно это — «подвисло и не отвисает».
+    //
+    // Сторож раз в секунду смотрит на реальное состояние и вмешивается по нарастающей:
+    //   1) прыжок к живому краю (или повторный prepare для не-живых источников);
+    //   2) переподключение к тому же каналу;
+    //   3) полное пересоздание плеера.
+    // Отдельно он следит за накопленным отставанием от эфира и возвращает картинку
+    // к живому краю, если буфер «раздулся» после серии провалов связи.
+    //
+    // Важно: лестница восстановления сбрасывается не по первому же STATE_READY
+    // (иначе поток, который дёргается READY-BUFFERING-READY, вечно застревал бы
+    // на первой ступени), а только после HEALTHY_MS непрерывного нормального
+    // воспроизведения с реально идущей позицией.
+
+    private var watchdogOn = false
+    private var stallSince = 0L
+    private var healthySince = 0L
+    private var lastPos = -1L
+    private var lastPosAt = 0L
+    private var recoverStage = 0
+    private var softRetries = 0
+    private var fullRebuilds = 0
+    private var lastRecoverAt = 0L
+
+    private val WD_PERIOD_MS = 1000L
+    private val WD_STALL_MS = 7000L      // сколько терпим буферизацию, прежде чем вмешаться
+    private val WD_FROZEN_MS = 12000L    // «играет», но позиция не двигается
+    private val WD_COOLDOWN_MS = 6000L   // пауза между попытками восстановления
+    private val WD_HEALTHY_MS = 12000L   // столько нормальной игры = поток здоров
+
+    private val watchdogTick = object : Runnable {
+        override fun run() {
+            if (!watchdogOn) return
+            try { watchdogStep() } catch (_: Throwable) { }
+            if (!watchdogOn) return
+            // ровно одна отложенная итерация, даже если внутри шага плеер пересоздали
+            handler.removeCallbacks(this)
+            handler.postDelayed(this, WD_PERIOD_MS)
+        }
+    }
+
+    private fun startWatchdog() {
+        resetWatchdog()
+        watchdogOn = true
+        handler.removeCallbacks(watchdogTick)
+        handler.postDelayed(watchdogTick, WD_PERIOD_MS)
+    }
+
+    private fun stopWatchdog() {
+        watchdogOn = false
+        handler.removeCallbacks(watchdogTick)
+        resetWatchdog()
+    }
+
+    private fun resetWatchdog() {
+        stallSince = 0L
+        healthySince = 0L
+        lastPos = -1L
+        lastPosAt = System.currentTimeMillis()
+        recoverStage = 0
+        softRetries = 0
+        fullRebuilds = 0
+    }
+
+    private fun watchdogStep() {
+        if (!::player.isInitialized || playerReleased) return
+        if (isCatchupPlayback) return
+        val ch = currentChannel ?: return
+        // пауза поставлена пользователем — это не подвисание
+        if (!player.playWhenReady) { stallSince = 0L; healthySince = 0L; return }
+
+        val now = System.currentTimeMillis()
+        val state = player.playbackState
+        val pos = player.currentPosition
+        if (pos != lastPos) { lastPos = pos; lastPosAt = now }
+
+        val buffering = state == Player.STATE_BUFFERING
+        val frozen = state == Player.STATE_READY && (now - lastPosAt > WD_FROZEN_MS)
+        val healthy = state == Player.STATE_READY && player.isPlaying && !frozen
+
+        if (healthy) {
+            stallSince = 0L
+            if (healthySince == 0L) healthySince = now
+            if (now - healthySince > WD_HEALTHY_MS) {
+                recoverStage = 0; softRetries = 0; fullRebuilds = 0
+            }
+
+            // буфер «раздулся»: уехали от живого края дальше разумного — возвращаемся
+            if (player.isCurrentMediaItemLive) {
+                val off = player.currentLiveOffset
+                if (off != C.TIME_UNSET && off > Quality.maxLiveOffsetMs() &&
+                    now - lastRecoverAt > WD_COOLDOWN_MS) {
+                    lastRecoverAt = now
+                    try { player.seekToDefaultPosition(); player.play() } catch (_: Throwable) { }
+                }
+            }
+            return
+        }
+
+        healthySince = 0L
+        if (!buffering && !frozen) return
+
+        if (stallSince == 0L) { stallSince = now; return }
+        if (now - stallSince < WD_STALL_MS) return
+        if (now - lastRecoverAt < WD_COOLDOWN_MS) return
+
+        lastRecoverAt = now
+        stallSince = now
+        lastPosAt = now
+        recoverStage++
+        recoverPlayback(ch, recoverStage)
+    }
+
+    private fun recoverPlayback(ch: Channel, stage: Int) {
+        when {
+            stage == 1 -> try {
+                // самое мягкое: догнать живой край
+                if (player.isCurrentMediaItemLive) player.seekToDefaultPosition() else player.prepare()
+                player.play()
+            } catch (_: Throwable) { }
+
+            stage == 2 -> try {
+                // переподключение к тому же каналу, канал не меняем
+                player.stop()
+                player.setMediaItem(Quality.mediaItem(ch.url))
+                player.prepare()
+                player.play()
+            } catch (_: Throwable) { }
+
+            else -> {
+                // Пересоздание плеера идёт через play(), а тот сбрасывает счётчики
+                // сторожа. Поэтому число подряд идущих пересборок запоминаем до
+                // вызова и восстанавливаем после — иначе лестница вечно крутилась бы
+                // по кругу 1-2-3 и пользователь так и не узнал бы, что поток мёртв.
+                val rounds = fullRebuilds + 1
+                rebuildPlayerKeepingChannel()
+                fullRebuilds = rounds
+                // мягкие ступени уже не сработали — начинаем сразу с переподключения
+                recoverStage = 2
+                if (rounds >= 2) {
+                    // play() внутри пересоздания прячет плашку, поэтому показываем после него
+                    handler.postDelayed({
+                        if (!playerReleased && watchdogOn &&
+                            player.playbackState != Player.STATE_READY) {
+                            errorMsg.text = "Поток не отвечает.\nПробуем восстановить соединение…"
+                            errorMsg.visibility = View.VISIBLE
+                        }
+                    }, 500)
+                }
+            }
+        }
     }
 
     private val hideOsdRunnable = Runnable { hideOsd() }
@@ -1364,8 +1569,10 @@ class PlayerActivity : Activity() {
         val ch = pendingPreview ?: return@Runnable
         if (panel == Panel.BROWSER && currentChannel?.url != ch.url) {
             if (playerReleased) buildPlayer()
-            player.setMediaItem(MediaItem.fromUri(ch.url)); player.prepare(); player.play()
+            player.setMediaItem(Quality.mediaItem(ch.url)); player.prepare(); player.play()
             currentChannel = ch
+            afrAppliedFor = null
+            startWatchdog()
         }
     }
 

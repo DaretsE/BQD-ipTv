@@ -7,8 +7,10 @@ import android.view.Display
 import androidx.media3.common.MediaItem
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultLivePlaybackSpeedControl
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.LivePlaybackSpeedControl
 import androidx.media3.exoplayer.LoadControl
 import androidx.media3.exoplayer.RenderersFactory
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
@@ -38,47 +40,102 @@ object Quality {
     // ------------------------------------------------------------------ буфер
 
     /**
-     * Буфер. bufferSec — «целевой» запас; из него считаются пороги ExoPlayer.
-     * Для live-потоков важно, чтобы порог старта был заметно меньше буфера,
-     * иначе канал долго «думает» перед запуском.
+     * Буфер.
+     *
+     * ГЛАВНОЕ ИСПРАВЛЕНИЕ ЗАВИСАНИЙ. Раньше нижний порог был вдвое меньше буфера
+     * (minMs = maxMs / 2). Из-за этого ExoPlayer, набрав буфер, ПОЛНОСТЬЮ
+     * останавливал докачку и не возобновлял её, пока запас не просядет вдвое.
+     * Для живого эфира это губительно: пока загрузчик молчит, сервер продолжает
+     * гнать поток, TCP-окно закрывается, udpxy/HLS-раздача теряет куски. После
+     * возобновления плеер получает разрыв, докачивается уже с отставанием — и с
+     * каждым таким циклом отставание растёт. Через несколько минут это выглядит
+     * ровно как «буфер забился»: картинка дёргается и встаёт.
+     *
+     * Теперь minMs == maxMs — загрузчик простаивает только на самой верхушке
+     * буфера и возобновляет докачку в ту же секунду, то есть тянет поток
+     * практически непрерывно.
+     *
+     * Второе: раньше targetBufferBytes не задавался. По умолчанию ExoPlayer
+     * считает его сам (~13 МБ на видео+звук), поэтому на HD-канале 8–12 Мбит/с
+     * буфер упирался в байты примерно на 10 секундах и настройка «60 сек»
+     * не работала вообще. Задаём лимит явно — настройка становится настоящей,
+     * а память при этом остаётся ограниченной.
      */
     fun loadControl(): LoadControl {
         val sec = Store.bufferSec.coerceIn(5, 120)
         val maxMs = sec * 1000
-        val minMs = (maxMs / 2).coerceAtLeast(4000)
+        // непрерывная докачка: загрузчик не «отпускает» живой источник
+        val minMs = maxMs
         // порог начала воспроизведения и порог после провала связи
-        val startMs = (maxMs / 6).coerceIn(1000, 4000)
-        val restartMs = (maxMs / 3).coerceIn(2000, 8000)
+        val startMs = (maxMs / 6).coerceIn(1500, 4000)
+        val restartMs = (maxMs / 3).coerceIn(2500, 8000)
         return DefaultLoadControl.Builder()
             .setBufferDurationsMs(minMs, maxMs, startMs, restartMs)
             // при слабом канале важнее набрать время, чем уложиться в лимит байт
             .setPrioritizeTimeOverSizeThresholds(true)
-            .setBackBuffer(10_000, true)
+            .setTargetBufferBytes(TARGET_BUFFER_BYTES)
+            // назад по живому эфиру не перематываем — хранить проигранное незачем
+            .setBackBuffer(0, false)
             .build()
     }
+
+    /** Потолок памяти под буфер. Больше «настоящего» буфера в секундах, но без риска OOM. */
+    private const val TARGET_BUFFER_BYTES = 40 * 1024 * 1024
 
     // ------------------------------------------------- задержка от прямого эфира
 
     /**
-     * Главный параметр для плохого интернета: отставание от «живого края».
-     * Если играть на 20–30 секунд позади эфира, кратковременные провалы канала
-     * съедаются буфером и зритель их не замечает.
-     * 0 — не вмешиваться (как отдаёт плейлист).
+     * Живая конфигурация потока.
+     *
+     * ВТОРОЕ ИСПРАВЛЕНИЕ ЗАВИСАНИЙ. Раньше при настройке «Как в потоке» (значение
+     * по умолчанию!) сюда возвращался голый MediaItem.fromUri() вообще без
+     * LiveConfiguration. Без неё ExoPlayer не имеет права подстраивать скорость
+     * воспроизведения, а значит НИКОГДА не отыгрывает накопленное отставание:
+     * каждый провал связи навсегда отодвигает картинку от живого края. Именно
+     * это копится «несколько минут», после чего смотреть невозможно.
+     *
+     * Теперь коридор скорости (0.97–1.05) задаётся всегда, а целевое отставание —
+     * только если пользователь выставил его явно. Для не-живых источников
+     * (архив, VOD) LiveConfiguration просто игнорируется, так что это безопасно.
      */
     fun mediaItem(url: String): MediaItem {
         val offsetSec = Store.liveOffsetSec
-        if (offsetSec <= 0) return MediaItem.fromUri(url)
+        val live = MediaItem.LiveConfiguration.Builder()
+            // мягкая подстройка скорости, чтобы держаться живого края
+            .setMinPlaybackSpeed(0.97f)
+            .setMaxPlaybackSpeed(1.05f)
+        if (offsetSec > 0) {
+            live.setTargetOffsetMs(offsetSec * 1000L)
+            live.setMaxOffsetMs(offsetSec * 1000L + 30_000L)
+        }
         return MediaItem.Builder()
             .setUri(url)
-            .setLiveConfiguration(
-                MediaItem.LiveConfiguration.Builder()
-                    .setTargetOffsetMs(offsetSec * 1000L)
-                    // мягкая подстройка скорости, чтобы держать заданное отставание
-                    .setMinPlaybackSpeed(0.97f)
-                    .setMaxPlaybackSpeed(1.03f)
-                    .build()
-            )
+            .setLiveConfiguration(live.build())
             .build()
+    }
+
+    /**
+     * ТРЕТЬЕ ИСПРАВЛЕНИЕ ЗАВИСАНИЙ. У ExoPlayer по умолчанию включён механизм,
+     * который после КАЖДОГО перебуфера увеличивает целевое отставание от эфира
+     * на 500 мс и возвращает его обратно крайне медленно. На нестабильном канале
+     * десяток мелких провалов за пару минут наращивает отставание на секунды,
+     * буфер раздувается — и это и есть то самое «буфер забился, смотреть нельзя».
+     * Отключаем наращивание: targetLiveOffsetIncrementOnRebuffer = 0.
+     */
+    fun livePlaybackSpeedControl(): LivePlaybackSpeedControl =
+        DefaultLivePlaybackSpeedControl.Builder()
+            .setFallbackMinPlaybackSpeed(0.97f)
+            .setFallbackMaxPlaybackSpeed(1.05f)
+            .setTargetLiveOffsetIncrementOnRebufferMs(0)
+            .build()
+
+    /**
+     * Допустимое отставание от живого края. Если плеер уехал дальше — значит
+     * буфер «раздулся» после серии провалов, и PlayerActivity вернёт его к эфиру.
+     */
+    fun maxLiveOffsetMs(): Long {
+        val target = if (Store.liveOffsetSec > 0) Store.liveOffsetSec * 1000L else 15_000L
+        return target + Store.bufferSec.coerceIn(5, 120) * 1000L + 30_000L
     }
 
     // ------------------------------------------------------------- декодер HW/SW

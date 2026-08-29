@@ -80,9 +80,25 @@ object Net {
     }
 }
 
+/**
+ * Логотипы каналов.
+ *
+ * Кэш переведён с «300 картинок любого размера» на лимит по ПАМЯТИ, а сами
+ * картинки уменьшаются при декодировании. Раньше логотип 1000x1000 занимал
+ * в памяти 4 МБ, и три сотни таких съедали сотни мегабайт: сборщик мусора
+ * начинал работать постоянно, а его паузы останавливают в том числе поток
+ * воспроизведения — снаружи это выглядит как рывки и подвисания картинки.
+ * В интерфейсе логотип нигде не крупнее ~190 px, так что визуально ничего
+ * не меняется.
+ */
 object ImageLoader {
-    // увеличенный кэш в памяти, чтобы логотипы не вымывались
-    private val mem = LruCache<String, Bitmap>(300)
+    private const val MAX_SIDE = 192
+    private const val CACHE_BYTES = 12 * 1024 * 1024
+
+    private val mem = object : LruCache<String, Bitmap>(CACHE_BYTES) {
+        override fun sizeOf(key: String, value: Bitmap): Int =
+            try { value.rowBytes * value.height } catch (_: Throwable) { 1 }
+    }
     private val pool = Executors.newFixedThreadPool(3)
     private val main = Handler(Looper.getMainLooper())
 
@@ -98,11 +114,27 @@ object ImageLoader {
                 if (!file.exists() || file.length() == 0L) {
                     Net.open(url).use { ins -> file.outputStream().use { ins.copyTo(it) } }
                 }
-                val bmp = BitmapFactory.decodeFile(file.absolutePath) ?: return@execute
+                val bmp = decodeScaled(file.absolutePath) ?: return@execute
                 mem.put(url, bmp)
                 main.post { if (into.tag == url) into.setImageBitmap(bmp) }
             } catch (_: Throwable) { }
         }
+    }
+
+    /** Декодирование с уменьшением: сначала читаем только размеры, потом сам файл. */
+    private fun decodeScaled(path: String): Bitmap? {
+        val probe = BitmapFactory.Options()
+        probe.inJustDecodeBounds = true
+        BitmapFactory.decodeFile(path, probe)
+        var sample = 1
+        val w = probe.outWidth
+        val h = probe.outHeight
+        if (w > 0 && h > 0) {
+            while (w / (sample * 2) >= MAX_SIDE || h / (sample * 2) >= MAX_SIDE) sample *= 2
+        }
+        val opts = BitmapFactory.Options()
+        opts.inSampleSize = sample
+        return BitmapFactory.decodeFile(path, opts)
     }
 }
 
