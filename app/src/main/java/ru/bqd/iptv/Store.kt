@@ -23,19 +23,41 @@ object Store {
         migrate()
     }
 
-    // Страховка: если приложение всё-таки вылетит (например, из-за слишком большой EPG),
-    // перед завершением процесса удаляем кэш программы, чтобы битый кэш не блокировал
-    // следующий запуск (раньше помогал только сброс данных приложения вручную).
+    // Страховка на случай вылета из-за слишком большой EPG.
+    //
+    // Раньше этот обработчик сносил кэш программы при ЛЮБОМ необработанном
+    // исключении в ЛЮБОМ потоке. То есть случайный сбой где угодно в приложении
+    // стоил пользователю многомегабайтной телепрограммы и пяти минут повторной
+    // закачки. Теперь удаляем кэш только в том единственном случае, ради
+    // которого страховка и делалась: нехватка памяти во время разбора EPG.
+    // Во всех остальных ситуациях кэш не трогаем — он не виноват.
     private var crashGuardInstalled = false
     private fun installCrashGuard() {
         if (crashGuardInstalled) return
         crashGuardInstalled = true
         val prev = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
-            try { File(cacheDir, "epg_cache.bin").delete() } catch (_: Throwable) {}
-            try { File(cacheDir, "epg_cache.bin.tmp").delete() } catch (_: Throwable) {}
+            try {
+                if (EpgManager.loading && isOom(e)) {
+                    File(cacheDir, "epg_cache.bin").delete()
+                    File(cacheDir, "epg_cache.bin.bak").delete()
+                }
+                // недописанный временный файл убираем всегда — он бесполезен
+                File(cacheDir, "epg_cache.bin.tmp").delete()
+            } catch (_: Throwable) {}
             prev?.uncaughtException(t, e)
         }
+    }
+
+    private fun isOom(e: Throwable?): Boolean {
+        var cur = e
+        var depth = 0
+        while (cur != null && depth < 8) {
+            if (cur is OutOfMemoryError) return true
+            cur = cur.cause
+            depth++
+        }
+        return false
     }
 
     private fun migrate() {

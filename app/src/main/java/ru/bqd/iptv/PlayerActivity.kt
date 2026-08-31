@@ -355,8 +355,6 @@ class PlayerActivity : Activity() {
             .setLoadControl(Quality.loadControl())
             .setRenderersFactory(Quality.renderersFactory(this))
             .setMediaSourceFactory(Quality.mediaSourceFactory(this))
-            // не наращивать отставание от эфира после каждого перебуфера
-            .setLivePlaybackSpeedControl(Quality.livePlaybackSpeedControl())
             .build()
         playerView.player = player
         player.playWhenReady = true
@@ -841,9 +839,11 @@ class PlayerActivity : Activity() {
     private var lastRecoverAt = 0L
 
     private val WD_PERIOD_MS = 1000L
-    private val WD_STALL_MS = 7000L      // сколько терпим буферизацию, прежде чем вмешаться
-    private val WD_FROZEN_MS = 12000L    // «играет», но позиция не двигается
-    private val WD_COOLDOWN_MS = 6000L   // пауза между попытками восстановления
+    // Порог намеренно больше обычной подгрузки (5–10 сек): сторож обязан ловить
+    // настоящее зависание, а не помогать плееру там, где тот справляется сам.
+    private val WD_STALL_MS = 20000L     // сколько терпим буферизацию, прежде чем вмешаться
+    private val WD_FROZEN_MS = 20000L    // «играет», но позиция не двигается
+    private val WD_COOLDOWN_MS = 12000L  // пауза между попытками восстановления
     private val WD_HEALTHY_MS = 12000L   // столько нормальной игры = поток здоров
 
     private val watchdogTick = object : Runnable {
@@ -902,16 +902,11 @@ class PlayerActivity : Activity() {
             if (now - healthySince > WD_HEALTHY_MS) {
                 recoverStage = 0; softRetries = 0; fullRebuilds = 0
             }
-
-            // буфер «раздулся»: уехали от живого края дальше разумного — возвращаемся
-            if (player.isCurrentMediaItemLive) {
-                val off = player.currentLiveOffset
-                if (off != C.TIME_UNSET && off > Quality.maxLiveOffsetMs() &&
-                    now - lastRecoverAt > WD_COOLDOWN_MS) {
-                    lastRecoverAt = now
-                    try { player.seekToDefaultPosition(); player.play() } catch (_: Throwable) { }
-                }
-            }
+            // Здесь была принудительная перемотка к живому краю по currentLiveOffset.
+            // Убрана: на IPTV-потоках отставание считается от EXT-X-PROGRAM-DATE-TIME,
+            // а он у многих раздач врёт (или врут часы приставки). Плеер, который
+            // играет нормально, получал команду прыгнуть — и это само по себе давало
+            // сброс буфера и заминку на несколько секунд по кругу.
             return
         }
 
@@ -932,8 +927,8 @@ class PlayerActivity : Activity() {
     private fun recoverPlayback(ch: Channel, stage: Int) {
         when {
             stage == 1 -> try {
-                // самое мягкое: догнать живой край
-                if (player.isCurrentMediaItemLive) player.seekToDefaultPosition() else player.prepare()
+                // самое мягкое: заново запросить данные, позицию не трогаем
+                player.prepare()
                 player.play()
             } catch (_: Throwable) { }
 

@@ -396,9 +396,30 @@ object EpgManager {
                 o.writeInt(nmSnap.size)
                 for ((k, v) in nmSnap) { o.writeUTF(cut(k, 200)); o.writeUTF(cut(v, 200)) }
             }
-            // атомарная подмена: пишем в .tmp, затем заменяем основной файл
-            if (f.exists()) f.delete()
-            if (!tmp.renameTo(f)) { tmp.copyTo(f, overwrite = true); tmp.delete() }
+            // ПОДМЕНА БЕЗ ОКНА, В КОТОРОМ КЭША НЕ СУЩЕСТВУЕТ.
+            //
+            // Раньше здесь было: f.delete(), потом tmp.renameTo(f). Между этими
+            // двумя строками рабочего кэша нет вообще. Установка обновления
+            // убивает процесс мгновенно и без предупреждения, и если фоновое
+            // сохранение EPG попало ровно в это окно — программа пропадала
+            // насовсем, и после обновления её приходилось качать заново.
+            //
+            // Теперь прежний файл сначала уезжает в .bak и удаляется только
+            // после успешной подмены. В любой момент времени на диске есть
+            // хотя бы одна целая копия: либо f, либо bak, либо обе.
+            val bak = File(f.absolutePath + ".bak")
+            try { if (bak.exists()) bak.delete() } catch (_: Throwable) {}
+            val hadOld = f.exists() && f.renameTo(bak)
+            if (tmp.renameTo(f)) {
+                if (hadOld) try { bak.delete() } catch (_: Throwable) {}
+            } else {
+                // переименование не прошло — копируем и оставляем bak как страховку
+                tmp.copyTo(f, overwrite = true)
+                tmp.delete()
+                if (hadOld && f.exists() && f.length() > 0L) {
+                    try { bak.delete() } catch (_: Throwable) {}
+                }
+            }
         } catch (_: Throwable) {
             try { tmp.delete() } catch (_: Throwable) {}
         }
@@ -410,10 +431,23 @@ object EpgManager {
     fun loadDiskCache() {
         if (loaded || loading) return
         val f = cacheFile ?: return
-        if (!f.exists() || f.length() == 0L) return
+        // Сначала основной файл, при неудаче — страховочная копия от прошлого
+        // сохранения. Раньше повреждённый файл просто удалялся, и программа
+        // пропадала целиком; теперь остаётся предыдущая версия кэша.
+        if (readCacheFrom(f)) return
+        val bak = File(f.absolutePath + ".bak")
+        if (readCacheFrom(bak)) {
+            // страховка сработала — возвращаем её на место основного файла
+            try { if (f.exists()) f.delete(); bak.renameTo(f) } catch (_: Throwable) {}
+        }
+    }
+
+    /** Читает один файл кэша. true — данные подняты, false — файла нет или он битый. */
+    private fun readCacheFrom(f: File): Boolean {
+        if (!f.exists() || f.length() == 0L) return false
         try {
             DataInputStream(BufferedInputStream(FileInputStream(f))).use { i ->
-                if (i.readInt() != CACHE_FORMAT) return   // старый формат — будет перезаписан при сетевой загрузке
+                if (i.readInt() != CACHE_FORMAT) return false   // старый формат — перезапишется при сетевой загрузке
                 val savedAt = i.readLong()
                 val pc = i.readInt()
                 if (pc < 0 || pc > 2_000_000) throw Exception("bad cache")
@@ -438,11 +472,13 @@ object EpgManager {
                 if (total > 0 && !loaded && !loading) {
                     progs = np; nameToId = nn
                     programCount = total; loaded = true; lastLoadedAt = savedAt; cacheSavedAt = savedAt
+                    return true
                 }
             }
         } catch (_: Throwable) {
             try { f.delete() } catch (_: Throwable) {}
         }
+        return false
     }
 
     // ---------- поиск передач по названию и описанию (нестрогий) ----------
