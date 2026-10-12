@@ -14,6 +14,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -44,19 +46,6 @@ jobs:
           echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/bqd.jks"
           echo "Keystore decoded ($(stat -c%s "$RUNNER_TEMP/bqd.jks") bytes)"
 
-      - name: Fetch previous version.json
-        run: |
-          REPO="${{ github.repository }}"
-          URL="https://github.com/$REPO/releases/latest/download/version.json"
-          echo "Trying $URL"
-          if curl -fsSL "$URL" -o prev_version.json; then
-            echo "Previous version.json found:"
-            cat prev_version.json
-          else
-            echo "No previous release (first build)."
-            echo "" > prev_version.json
-          fi
-
       - name: Build release APK
         env:
           KEYSTORE_PATH: ${{ runner.temp }}/bqd.jks
@@ -65,11 +54,44 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           gradle assembleRelease --no-daemon \
-            -PversionCode=${{ github.run_number }} \
+            -PversionCode=$((${{ github.run_number }} * 10)) \
             -PversionName=2.0.${{ github.run_number }}
 
       - name: Rename APK
         run: cp app/build/outputs/apk/release/app-release.apk BQDiptv.apk
+
+      - name: Build three rollback-compatible APKs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KEYSTORE_PATH: ${{ runner.temp }}/bqd.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          REPO="${{ github.repository }}"
+          RUN="${{ github.run_number }}"
+          jq -n '[]' > rollback_versions.json
+          gh api "repos/$REPO/releases?per_page=30" |
+            jq -r '[.[] | select(.draft == false and .prerelease == false) | .tag_name | select(test("^v[0-9]+$"))] | .[:3][]' > rollback_tags.txt
+          INDEX=0
+          while IFS= read -r TAG; do
+            INDEX=$((INDEX + 1))
+            OLD_RUN="${TAG#v}"
+            CHECKOUT="$RUNNER_TEMP/rollback-$OLD_RUN"
+            git worktree add --detach "$CHECKOUT" "$TAG"
+            mkdir -p "$CHECKOUT/app/src/main/assets"
+            cp app/src/main/assets/icons.otf "$CHECKOUT/app/src/main/assets/icons.otf"
+            gradle -p "$CHECKOUT" assembleRelease --no-daemon \
+              -PversionCode=$((RUN * 10 + INDEX)) \
+              -PversionName="2.0.$OLD_RUN"
+            APK="BQDiptv-rollback-$OLD_RUN.apk"
+            cp "$CHECKOUT/app/build/outputs/apk/release/app-release.apk" "$APK"
+            URL="https://github.com/$REPO/releases/download/v$RUN/$APK"
+            jq --argjson code "$((OLD_RUN * 10))" --arg name "2.0.$OLD_RUN" --arg url "$URL" \
+              '. + [{versionCode: $code, versionName: $name, apkUrl: $url}]' \
+              rollback_versions.json > rollback_versions.tmp
+            mv rollback_versions.tmp rollback_versions.json
+          done < rollback_tags.txt
 
       - name: Generate version.json
         run: |
@@ -77,18 +99,16 @@ jobs:
           RUN="${{ github.run_number }}"
           APK_URL="https://github.com/$REPO/releases/download/v$RUN/BQDiptv.apk"
           NOTES="Сборка #$RUN"
-          if [ -s prev_version.json ] && jq -e . prev_version.json >/dev/null 2>&1; then
-            PREV=$(jq '{versionCode: .versionCode, versionName: .versionName, apkUrl: .apkUrl}' prev_version.json)
-          else
-            PREV=null
-          fi
+          PREV=$(jq '.[0] // null' rollback_versions.json)
+          HISTORY=$(cat rollback_versions.json)
           jq -n \
-            --argjson vc "$RUN" \
+            --argjson vc "$((RUN * 10))" \
             --arg vn "2.0.$RUN" \
             --arg url "$APK_URL" \
             --arg notes "$NOTES" \
             --argjson prev "$PREV" \
-            '{versionCode: $vc, versionName: $vn, apkUrl: $url, notes: $notes, previous: $prev}' \
+            --argjson history "$HISTORY" \
+            '{versionCode: $vc, versionName: $vn, apkUrl: $url, notes: $notes, previous: $prev, history: $history}' \
             > version.json
           echo "New version.json:"
           cat version.json
@@ -100,6 +120,7 @@ jobs:
           name: BQDiptv 2.0.${{ github.run_number }}
           files: |
             BQDiptv.apk
+            BQDiptv-rollback-*.apk
             version.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
