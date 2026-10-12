@@ -22,22 +22,35 @@ class BootReceiver : BroadcastReceiver() {
 }
 
 object IpUtil {
-    fun localIp(): String {
+    fun localIpOrNull(): String? {
         try {
+            val candidates = ArrayList<Pair<Int, String>>()
             val ifaces = NetworkInterface.getNetworkInterfaces()
             while (ifaces.hasMoreElements()) {
                 val ni = ifaces.nextElement()
-                if (!ni.isUp || ni.isLoopback) continue
+                if (!ni.isUp || ni.isLoopback || ni.isVirtual) continue
                 val addrs = ni.inetAddresses
                 while (addrs.hasMoreElements()) {
                     val a = addrs.nextElement()
                     val host = a.hostAddress ?: continue
-                    if (!a.isLoopbackAddress && !host.contains(":")) return host
+                    if (a.isAnyLocalAddress || a.isLoopbackAddress || a.isLinkLocalAddress || host.contains(":")) continue
+                    val name = ni.name.lowercase()
+                    val priority = when {
+                        name.startsWith("wlan") || name.startsWith("wifi") -> 0
+                        name.startsWith("eth") || name.startsWith("en") -> 1
+                        name.startsWith("rmnet") || name.startsWith("ccmni") -> 3
+                        name.startsWith("tun") || name.startsWith("tap") -> 4
+                        else -> 2
+                    }
+                    candidates.add(priority to host)
                 }
             }
+            return candidates.minByOrNull { it.first }?.second
         } catch (_: Exception) { }
-        return "0.0.0.0"
+        return null
     }
+
+    fun localIp(): String = localIpOrNull() ?: "0.0.0.0"
 }
 
 class WebConfigServer(private val onAction: (String) -> Unit) : NanoHTTPD(PORT) {

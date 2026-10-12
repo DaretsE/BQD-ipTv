@@ -10,6 +10,7 @@ import android.os.Looper
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import org.json.JSONObject
+import org.json.JSONArray
 import java.io.File
 
 /**
@@ -27,6 +28,8 @@ import java.io.File
  * включая переход между http и https, который HttpURLConnection сам не проходит.
  */
 object UpdateManager {
+
+    data class Release(val versionCode: Int, val versionName: String, val apkUrl: String)
 
     data class Info(
         val versionCode: Int,
@@ -66,6 +69,69 @@ object UpdateManager {
                 prevUrl = prev?.optString("apkUrl", "") ?: ""
             )
         } catch (_: Exception) { null }
+    }
+
+    /** Последние три доступные сборки старше установленной. Старые релизы ищем через GitHub API. */
+    fun fetchRollbackVersions(repo: String, currentCode: Int): List<Release> {
+        val found = LinkedHashMap<Int, Release>()
+        val base = repo.trim().trimEnd('/')
+        try {
+            val root = JSONObject(Net.downloadText("$base/releases/latest/download/version.json", 256 * 1024))
+            fun add(o: JSONObject?) {
+                if (o == null) return
+                val code = o.optInt("versionCode")
+                val name = o.optString("versionName")
+                val url = o.optString("apkUrl")
+                if (code > 0 && code < currentCode && name.isNotBlank() && url.startsWith("https://"))
+                    found[code] = Release(code, name, url)
+            }
+            add(root)
+            val history = root.optJSONArray("history")
+            if (history != null) for (i in 0 until history.length()) add(history.optJSONObject(i))
+            add(root.optJSONObject("previous"))
+            // Старые version.json образуют цепочку через previous.
+            var previous = root.optJSONObject("previous")
+            var hops = 0
+            while (found.size < 3 && previous != null && hops++ < 8) {
+                val code = previous.optInt("versionCode")
+                if (code <= 0) break
+                previous = try {
+                    val old = JSONObject(Net.downloadText("$base/releases/download/v$code/version.json", 256 * 1024))
+                    val next = old.optJSONObject("previous")
+                    add(next)
+                    next
+                } catch (_: Exception) { null }
+            }
+        } catch (_: Exception) { }
+
+        // До появления history в version.json релизы содержали только поле previous.
+        if (found.size < 3) {
+            try {
+                val path = java.net.URI(base).path.trim('/').split('/')
+                if (java.net.URI(base).host.equals("github.com", ignoreCase = true) && path.size == 2) {
+                    val api = "https://api.github.com/repos/${path[0]}/${path[1]}/releases?per_page=30"
+                    val releases = JSONArray(Net.downloadText(api, 512 * 1024))
+                    for (i in 0 until releases.length()) {
+                        val release = releases.optJSONObject(i) ?: continue
+                        if (release.optBoolean("draft") || release.optBoolean("prerelease")) continue
+                        val code = release.optString("tag_name").removePrefix("v").toIntOrNull() ?: continue
+                        if (code >= currentCode || code <= 0 || found.containsKey(code)) continue
+                        val assets = release.optJSONArray("assets") ?: continue
+                        for (j in 0 until assets.length()) {
+                            val asset = assets.optJSONObject(j) ?: continue
+                            if (!asset.optString("name").endsWith(".apk", ignoreCase = true)) continue
+                            val url = asset.optString("browser_download_url")
+                            if (!url.startsWith("https://")) continue
+                            val title = release.optString("name").removePrefix("BQDiptv").trim()
+                            val name = title.takeIf { it.matches(Regex("[0-9]+(\\.[0-9]+)+")) } ?: "2.0.$code"
+                            found[code] = Release(code, name, url)
+                            break
+                        }
+                    }
+                }
+            } catch (_: Exception) { }
+        }
+        return found.values.sortedByDescending { it.versionCode }.take(3)
     }
 
     fun checkAsync(ctx: Context, repo: String, onResult: (Info?, Int) -> Unit) {

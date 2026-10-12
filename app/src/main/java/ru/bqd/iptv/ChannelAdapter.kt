@@ -25,10 +25,8 @@ import android.widget.TextView
  *  1. ViewHolder — убраны повторные findViewById на каждый getView.
  *  2. rowAction — INVISIBLE вместо GONE: строка всегда 64dp, layout не
  *     пересчитывается при смене выделения → нет дёрганья.
- *  3. Точечная перерисовка только затронутых строк (refreshPosition)
- *     вместо notifyDataSetChanged() → ListView не пересоздаёт весь список.
- *  4. Обновление синхронное (без post) → кнопка меняется в тот же кадр,
- *     что и выделение, без запаздывания.
+ *  3. При смене выделения обновляются только кнопки двух затронутых строк:
+ *     логотипы и данные программы не загружаются повторно.
  */
 class ChannelAdapter(
     private val ctx: Context,
@@ -59,18 +57,15 @@ class ChannelAdapter(
             refreshPosition(selectedPos)
         }
 
-    /**
-     * Перерисовать одну видимую строку, не трогая остальные.
-     * Вызываем getView на существующем child — ViewHolder уже на месте,
-     * inflate не произойдёт, только обновятся данные.
-     */
+    /** Обновить кнопку у видимой строки без повторной загрузки логотипа и EPG. */
     private fun refreshPosition(pos: Int) {
         val lv = listView ?: return
         val first = lv.firstVisiblePosition
         val last = lv.lastVisiblePosition
         if (pos < first || pos > last) return
         val child = lv.getChildAt(pos - first) ?: return
-        getView(pos, child, lv)
+        val holder = child.tag as? VH ?: return
+        bindAction(holder, items[pos], pos)
     }
 
     fun update(list: List<Channel>) { items = list; notifyDataSetChanged() }
@@ -113,6 +108,11 @@ class ChannelAdapter(
             else h.now.visibility = View.GONE
         } else h.now.visibility = View.GONE
 
+        bindAction(h, ch, position)
+        return v
+    }
+
+    private fun bindAction(h: VH, ch: Channel, position: Int) {
         val fav = Store.isFavorite(ch.url)
         h.star.visibility = if (fav && position != selectedPos) View.VISIBLE else View.GONE
 
@@ -133,6 +133,5 @@ class ChannelAdapter(
             h.action.visibility = View.INVISIBLE
             h.action.isActivated = false
         }
-        return v
     }
 }

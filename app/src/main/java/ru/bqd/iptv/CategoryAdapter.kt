@@ -5,7 +5,6 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.BaseAdapter
-import android.widget.LinearLayout
 import android.widget.TextView
 
 /**
@@ -51,6 +50,7 @@ class CategoryAdapter(
         "FAV" -> "star"
         "PLSEL" -> "playlist_play"
         "ALL" -> "apps"
+        "ADD_PLAYLIST" -> "playlist_add"
         else -> GroupIcons.iconFor(item.group ?: item.title)
     }
 
@@ -83,19 +83,15 @@ class CategoryAdapter(
         left.text = item.title
 
         if (compact) {
-            // рейка: только иконка по центру
+            // В обоих состояниях иконка занимает те же 30dp после 14dp отступа.
+            // Иначе при сворачивании она смещается к центру узкой строки.
             left.visibility = View.GONE
             right.visibility = View.GONE
-            icon.layoutParams = (icon.layoutParams as LinearLayout.LayoutParams).apply {
-                width = LinearLayout.LayoutParams.MATCH_PARENT
-                marginEnd = 0
-            }
-            val pad = (ctx.resources.displayMetrics.density * 12).toInt()
-            v.setPadding(0, pad, 0, pad)
             if (position == activePos) v.setBackgroundResource(R.drawable.rail_active)
             else v.setBackgroundResource(0)
         } else {
             left.visibility = View.VISIBLE
+            v.setBackgroundResource(0)
             if (item.count > 0) {
                 right.text = item.count.toString()
                 right.visibility = View.VISIBLE

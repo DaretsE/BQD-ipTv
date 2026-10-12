@@ -13,6 +13,10 @@ android {
     namespace 'ru.bqd.iptv'
     compileSdk 34
 
+    buildFeatures {
+        buildConfig true
+    }
+
     defaultConfig {
         applicationId "ru.bqd.iptv"
         minSdk 21
@@ -34,7 +38,16 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Изолированный чистый запуск для проверки онбординга без удаления данных основного приложения.
+            if (project.hasProperty('onboardingTest')) applicationIdSuffix '.onboardingtest'
+            // Локальный предпросмотр без загрузки видео. Для возврата потока:
+            // ./gradlew assembleDebug -PvideoPlaceholder=false
+            buildConfigField "boolean", "VIDEO_PLACEHOLDER", (project.findProperty('videoPlaceholder') ?: 'true').toString()
+        }
         release {
+            // Временный режим предпросмотра: релиз показывает статичную заглушку и не запускает поток.
+            buildConfigField "boolean", "VIDEO_PLACEHOLDER", "true"
             minifyEnabled false
             // Подписываем релиз только если переданы данные ключа (есть в Actions).
             if (System.getenv("KEYSTORE_PATH") != null) {

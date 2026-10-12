@@ -4,11 +4,17 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.app.UiModeManager
 import android.content.Context
+import android.content.BroadcastReceiver
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Outline
+import android.graphics.Rect
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -17,6 +23,7 @@ import android.view.KeyEvent
 import android.view.Gravity
 import android.view.animation.PathInterpolator
 import android.view.View
+import android.view.ViewOutlineProvider
 import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -27,6 +34,7 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.media3.common.C
+import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -40,7 +48,10 @@ import com.google.zxing.qrcode.QRCodeWriter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 import kotlin.random.Random
+
+private const val REMOTE_HOLD_ACTION = "ru.bqd.iptv.VIRTUAL_REMOTE_HOLD"
 
 class PlayerActivity : Activity() {
 
@@ -48,7 +59,19 @@ class PlayerActivity : Activity() {
 
     private lateinit var player: ExoPlayer
     private lateinit var playerView: PlayerView
+    private lateinit var videoPlaceholder: ImageView
+    private lateinit var emptyStage: View
+    private lateinit var widgetBar: LinearLayout
+    private lateinit var widgetClock: TextView
+    private lateinit var widgetWeather: TextView
+    private lateinit var widgetSeparator: TextView
+    private var widgetVisibilityTarget: Boolean? = null
+    private var networkWidgetPlace: WidgetWeather.Place? = null
+    private var widgetWeatherPlaceName = ""
+    private var widgetRequestGeneration = 0
     private var playerReleased = false
+
+    private val useVideoPlaceholder: Boolean get() = BuildConfig.VIDEO_PLACEHOLDER
 
     private lateinit var osdPanel: View
     private lateinit var osdLogo: ImageView
@@ -71,17 +94,22 @@ class PlayerActivity : Activity() {
     private lateinit var browserOverlay: View
     private lateinit var browserList: View
     private lateinit var browserHeader: TextView
+    private lateinit var browserHeaderIcon: TextView
     private lateinit var browserPlName: TextView
     private lateinit var browserListView: ListView
+    private lateinit var previewBackdrop: View
     private lateinit var previewCard: View
     private lateinit var prevLogo: ImageView
     private lateinit var prevName: TextView
     private lateinit var prevNow: TextView
     private lateinit var prevProgress: ProgressBar
     private lateinit var prevRemain: TextView
+    private lateinit var prevDesc: TextView
     private lateinit var prevNext: TextView
 
     private lateinit var leftMenu: View
+    private lateinit var menuFoldSurface: View
+    private lateinit var menuFoldContent: ImageView
     private lateinit var leftFixedTop: View
     private lateinit var settingsRow: View
     private lateinit var searchRow: View
@@ -93,6 +121,7 @@ class PlayerActivity : Activity() {
     private lateinit var catList: ListView
 
     private lateinit var rightPanel: View
+    private var epgClosing = false
     private lateinit var epgHeader: TextView
     private lateinit var nowTitle: TextView
     private lateinit var nowTime: TextView
@@ -102,8 +131,20 @@ class PlayerActivity : Activity() {
     private lateinit var epgList: ListView
 
     private lateinit var setupOverlay: View
+    private lateinit var setupBackground: View
     private lateinit var setupUrl: TextView
     private lateinit var qrImage: ImageView
+    private lateinit var setupManual: View
+    private lateinit var setupLater: View
+    private var webServerReady = false
+    private var setupQrUrl: String? = null
+    private val setupAddressTick = object : Runnable {
+        override fun run() {
+            if (setupOverlay.visibility != View.VISIBLE) return
+            updateSetupAddress()
+            handler.postDelayed(this, 4000)
+        }
+    }
     private lateinit var phoneSetup: View
     private lateinit var phoneSetupStatus: TextView
     private lateinit var modePicker: View
@@ -115,11 +156,13 @@ class PlayerActivity : Activity() {
 
     private lateinit var searchOverlay: View
     private lateinit var searchContent: View
-    private lateinit var searchInput: EditText
+    private lateinit var searchInput: SearchEditText
     private lateinit var searchStatus: TextView
     private lateinit var searchResults: ListView
     private var searchRows: List<SearchRow> = emptyList()
     private var searchSeq = 0
+    private var searchReturning = false
+    private var searchBackCallback: android.window.OnBackInvokedCallback? = null
     private var focusResultsAfterSearch = false
     private val searchRunnable = Runnable { doSearch() }
 
@@ -152,7 +195,12 @@ class PlayerActivity : Activity() {
     private lateinit var setDetail: LinearLayout
     private lateinit var setDetailScroll: android.widget.ScrollView
     private var setDetailActive = false
+    private var settingsReturning = false
     private var setSelected = 0
+    private var settingsQrCachedUrl: String? = null
+    private var settingsQrCachedBitmap: Bitmap? = null
+    private var settingsQrLoadingUrl: String? = null
+    private val settingsQrWaitingImages = mutableListOf<ImageView>()
 
     private lateinit var stageDim: View
 
@@ -171,15 +219,32 @@ class PlayerActivity : Activity() {
     private var browserChannels: List<Channel> = emptyList()
 
     private var browserActionFocused = false
+    private var lastBrowserHoldJumpMs = 0L
+    private var browserHoldStarted = false
+    private var menuReturnCategoryIndex = -1
+    private var menuUpPressCategoryIndex = -1
+    private var menuDownHoldEligible = false
+    private var menuDownHoldActivated = false
+    private val remoteHoldReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action != REMOTE_HOLD_ACTION) return
+            handleRemoteHold(intent.getIntExtra("keyCode", -1))
+        }
+    }
 
-    private val MENU_W_FULL = 392
-    private val MENU_W_RAIL = 88
+    private val MENU_W_FULL = 400
+    private val MENU_W_RAIL = 96
     private val MENU_PAD_FULL = 16
     private val MENU_PAD_RAIL = 10
 
     private var menuCollapsed = false
     private var menuWidthAnim: android.animation.ValueAnimator? = null
+    private var menuMorphRunning = false
+    private var menuMorphGeneration = 0
+    private var menuMorphComplete: (() -> Unit)? = null
+    private var menuMorphAnimator: android.animation.ValueAnimator? = null
     private var channelBeforeBrowse: Channel? = null
+    private var browserOpenedFromLeft = false
     private var modeSelection = "tv"
 
     private val timeFmt = SimpleDateFormat("HH:mm", Locale.getDefault())
@@ -195,6 +260,8 @@ class PlayerActivity : Activity() {
         EpgManager.loadDiskCache()
         detectDevice()
         bindViews()
+        refreshWidgetUi()
+        refreshWidgetData()
         buildPlayer()
         startWebServer()
         setupPhoneControls()
@@ -204,6 +271,7 @@ class PlayerActivity : Activity() {
         isPhone = false
         applyMode()
         reloadFromStore(firstRun = false)
+        ContextCompat.registerReceiver(this, remoteHoldReceiver, IntentFilter(REMOTE_HOLD_ACTION), ContextCompat.RECEIVER_EXPORTED)
         handler.postDelayed(screensaverTick, 30000)
         handler.postDelayed(clockTick, 1000)
         handler.postDelayed(epgRefreshTick, 3L * 3600 * 1000)
@@ -220,6 +288,28 @@ class PlayerActivity : Activity() {
 
     private fun bindViews() {
         playerView = findViewById(R.id.playerView)
+        videoPlaceholder = findViewById(R.id.videoPlaceholder)
+        emptyStage = findViewById(R.id.emptyStage)
+        widgetBar = findViewById(R.id.widgetBar)
+        widgetClock = findViewById(R.id.widgetClock)
+        widgetWeather = findViewById(R.id.widgetWeather)
+        widgetSeparator = findViewById(R.id.widgetSeparator)
+        widgetClock.setShadowLayer(dp(2).toFloat(), 0f, dp(1).toFloat(), Color.BLACK)
+        widgetWeather.setShadowLayer(dp(2).toFloat(), 0f, dp(1).toFloat(), Color.BLACK)
+        for (id in listOf(R.id.setupLogo, R.id.emptyStageLogo)) {
+            findViewById<ImageView>(id).apply {
+                outlineProvider = object : ViewOutlineProvider() {
+                    override fun getOutline(view: View, outline: Outline) {
+                        outline.setRoundRect(0, 0, view.width, view.height, dp(14).toFloat())
+                    }
+                }
+                clipToOutline = true
+            }
+        }
+        if (useVideoPlaceholder) {
+            playerView.visibility = View.GONE
+            videoPlaceholder.visibility = View.VISIBLE
+        }
         osdPanel = findViewById(R.id.osdPanel)
         osdLogo = findViewById(R.id.osdLogo)
         osdChannel = findViewById(R.id.osdChannel)
@@ -249,16 +339,21 @@ class PlayerActivity : Activity() {
         browserOverlay = findViewById(R.id.browserOverlay)
         browserList = findViewById(R.id.browserList)
         browserHeader = findViewById(R.id.browserHeader)
+        browserHeaderIcon = findViewById(R.id.browserHeaderIcon)
         browserPlName = findViewById(R.id.browserPlName)
         browserListView = findViewById(R.id.browserListView)
+        previewBackdrop = findViewById(R.id.previewBackdrop)
         previewCard = findViewById(R.id.previewCard)
         prevLogo = findViewById(R.id.prevLogo)
         prevName = findViewById(R.id.prevName)
         prevNow = findViewById(R.id.prevNow)
         prevProgress = findViewById(R.id.prevProgress)
         prevRemain = findViewById(R.id.prevRemain)
+        prevDesc = findViewById(R.id.prevDesc)
         prevNext = findViewById(R.id.prevNext)
         leftMenu = findViewById(R.id.leftMenu)
+        menuFoldSurface = findViewById(R.id.menuFoldSurface)
+        menuFoldContent = findViewById(R.id.menuFoldContent)
         leftFixedTop = findViewById(R.id.leftFixedTop)
         settingsRow = findViewById(R.id.settingsRow)
         searchRow = findViewById(R.id.searchRow)
@@ -277,8 +372,13 @@ class PlayerActivity : Activity() {
         nowDesc = findViewById(R.id.nowDesc)
         epgList = findViewById(R.id.epgList)
         setupOverlay = findViewById(R.id.setupOverlay)
+        setupBackground = findViewById(R.id.setupBackground)
         setupUrl = findViewById(R.id.setupUrl)
         qrImage = findViewById(R.id.qrImage)
+        setupManual = findViewById(R.id.setupManual)
+        setupLater = findViewById(R.id.setupLater)
+        setupManual.setOnClickListener { showManualUrlDialog(fromPhoneSetup = false) }
+        setupLater.setOnClickListener { deferSetup() }
         phoneSetup = findViewById(R.id.phoneSetup)
         phoneSetupStatus = findViewById(R.id.phoneSetupStatus)
         modePicker = findViewById(R.id.modePicker)
@@ -303,23 +403,29 @@ class PlayerActivity : Activity() {
         val railMarginStart = dpx(8)
         val railGap = dpx(18)
         val panelLeftMargin = railMarginStart + railW + railGap
+        val browserLeftMargin = railMarginStart + railW + dpx(10)
 
         val overlapLeft = dpx(40)
         val overlapRight = dpx(60)
 
-        val listW = minOf(dpx(540), (w * 0.62).toInt()).coerceAtLeast(dpx(240))
+        val listW = minOf(dpx(460), (w * 0.55).toInt()).coerceAtLeast(dpx(240))
         (browserList.layoutParams as? FrameLayout.LayoutParams)?.let {
-            it.leftMargin = panelLeftMargin - overlapLeft
+            it.leftMargin = browserLeftMargin - overlapLeft
             it.width = listW + overlapLeft
             browserList.layoutParams = it
         }
-        browserList.setPadding(dpx(24) + overlapLeft, browserList.paddingTop, browserList.paddingRight, browserList.paddingBottom)
+        browserList.setPadding(dpx(10) + overlapLeft, browserList.paddingTop, browserList.paddingRight, browserList.paddingBottom)
 
+        val previewLeftMargin = browserLeftMargin + listW - overlapRight
+        (previewBackdrop.layoutParams as? FrameLayout.LayoutParams)?.let {
+            it.leftMargin = previewLeftMargin
+            previewBackdrop.layoutParams = it
+        }
         (previewCard.layoutParams as? FrameLayout.LayoutParams)?.let {
-            it.leftMargin = panelLeftMargin + listW - overlapRight
+            it.leftMargin = previewLeftMargin
             previewCard.layoutParams = it
         }
-        previewCard.setPadding(dpx(32) + overlapRight, previewCard.paddingTop, previewCard.paddingRight, previewCard.paddingBottom)
+        previewCard.setPadding(dpx(8) + overlapRight, previewCard.paddingTop, previewCard.paddingRight, previewCard.paddingBottom)
 
         if (!menuCollapsed) {
             leftMenu.layoutParams = leftMenu.layoutParams.apply {
@@ -338,10 +444,10 @@ class PlayerActivity : Activity() {
         setListPanel.setPadding(dpx(24) + overlapLeft, setListPanel.paddingTop, setListPanel.paddingRight, setListPanel.paddingBottom)
 
         (setDetailScroll.layoutParams as? FrameLayout.LayoutParams)?.let {
-            it.leftMargin = panelLeftMargin + baseSetListW - overlapRight
+            it.leftMargin = panelLeftMargin + baseSetListW - dpx(16)
             setDetailScroll.layoutParams = it
         }
-        setDetailScroll.setPadding(dpx(34) + overlapRight, setDetailScroll.paddingTop, setDetailScroll.paddingRight, setDetailScroll.paddingBottom)
+        setDetailScroll.setPadding(dpx(34 + 16), setDetailScroll.paddingTop, setDetailScroll.paddingRight, setDetailScroll.paddingBottom)
 
         browserList.translationX = 0f
         previewCard.translationX = 0f
@@ -356,8 +462,8 @@ class PlayerActivity : Activity() {
             .setRenderersFactory(Quality.renderersFactory(this))
             .setMediaSourceFactory(Quality.mediaSourceFactory(this))
             .build()
-        playerView.player = player
-        player.playWhenReady = true
+        playerView.player = if (useVideoPlaceholder) null else player
+        player.playWhenReady = !useVideoPlaceholder
         applyQuality()
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) { handleStreamError() }
@@ -415,7 +521,6 @@ class PlayerActivity : Activity() {
         val p = player.trackSelectionParameters.buildUpon()
         when (Store.quality) {
             "stable" -> { p.setMaxVideoSize(1280, 720); p.setMaxVideoBitrate(2_800_000) }
-            "max" -> { p.clearVideoSizeConstraints(); p.setMaxVideoBitrate(Int.MAX_VALUE) }
             else -> { p.clearVideoSizeConstraints(); p.setMaxVideoBitrate(Int.MAX_VALUE) }
         }
         player.trackSelectionParameters = p.build()
@@ -425,7 +530,8 @@ class PlayerActivity : Activity() {
         try {
             webServer = WebConfigServer { action -> runOnUiThread { onWebAction(action) } }
             webServer?.start(fi.iki.elonen.NanoHTTPD.SOCKET_READ_TIMEOUT, true)
-        } catch (_: Exception) { }
+            webServerReady = true
+        } catch (_: Exception) { webServerReady = false }
     }
 
     private fun onWebAction(action: String) {
@@ -446,6 +552,9 @@ class PlayerActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        if (::setupOverlay.isInitialized && setupOverlay.visibility == View.VISIBLE) {
+            updateSetupAddress()
+        }
         if (awaitingInstall && UpdateManager.canInstall(this)) {
             awaitingInstall = false
             handler.postDelayed({
@@ -465,6 +574,8 @@ class PlayerActivity : Activity() {
     }
 
     override fun onDestroy() {
+        unregisterSearchBackCallback()
+        unregisterReceiver(remoteHoldReceiver)
         Quality.resetFrameRate(this)
         super.onDestroy()
         stopWatchdog()
@@ -486,6 +597,7 @@ class PlayerActivity : Activity() {
         container.orientation = if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT)
             LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
         modePicker.visibility = View.VISIBLE
+        updateWidgetsVisibility()
         highlightMode()
         (if (modeSelection == "tv") modeTv else modePhone).requestFocus()
     }
@@ -499,6 +611,7 @@ class PlayerActivity : Activity() {
         Store.mode = m
         isPhone = m == "phone"
         modePicker.visibility = View.GONE
+        updateWidgetsVisibility()
         applyMode()
         reloadFromStore(firstRun = true)
     }
@@ -516,17 +629,19 @@ class PlayerActivity : Activity() {
         findViewById<View>(R.id.pbNext).setOnClickListener { zap(1) }
         findViewById<View>(R.id.pbFav).setOnClickListener { toggleFavoriteCurrent() }
         findViewById<View>(R.id.pbEpg).setOnClickListener { openEpgPanel() }
-        playerView.setOnClickListener {
+        val videoClick = View.OnClickListener {
             if (isPhone && panel == Panel.NONE) {
                 phoneBar.visibility = if (phoneBar.visibility == View.VISIBLE) View.GONE else View.VISIBLE
                 currentChannel?.let { showOsd(it) }
             }
         }
+        playerView.setOnClickListener(videoClick)
+        videoPlaceholder.setOnClickListener(videoClick)
         findViewById<View>(R.id.psAddPlaylist).setOnClickListener { showManualUrlDialog(fromPhoneSetup = true) }
         findViewById<View>(R.id.psAddEpg).setOnClickListener { showManualEpgDialog(fromPhoneSetup = true) }
         findViewById<View>(R.id.psStart).setOnClickListener {
             if (playlists.isEmpty()) toast("Сначала добавьте рабочий плейлист")
-            else { phoneSetup.visibility = View.GONE; if (currentChannel == null) restoreLastChannel(); applyMode() }
+            else { phoneSetup.visibility = View.GONE; updateWidgetsVisibility(); if (currentChannel == null) restoreLastChannel(); applyMode() }
         }
     }
 
@@ -565,11 +680,24 @@ class PlayerActivity : Activity() {
                 runOnUiThread {
                     playlists = loaded
                     if (playlists.isEmpty()) {
-                        if (isPhone) showPhoneSetup() else showSetupOverlay()
+                        showEmptyStage()
+                        if (Store.setupDeferred) {
+                            setupOverlay.visibility = View.GONE
+                            setupBackground.visibility = View.GONE
+                            phoneSetup.visibility = View.GONE
+                            if (panel == Panel.NONE) openLeftMenu() else if (panel == Panel.LEFT) refreshLeftMenu()
+                        } else if (isPhone) showPhoneSetup() else showSetupOverlay()
                         if (failed.isNotEmpty()) toast("Не удалось загрузить: ${failed.joinToString(", ")}")
                     } else {
+                        emptyStage.visibility = View.GONE
+                        if (!useVideoPlaceholder) {
+                            videoPlaceholder.visibility = View.GONE
+                            playerView.visibility = View.VISIBLE
+                        }
                         setupOverlay.visibility = View.GONE
+                        setupBackground.visibility = View.GONE
                         phoneSetup.visibility = View.GONE
+                        if (panel == Panel.LEFT) refreshLeftMenu()
                         if (currentChannel == null) restoreLastChannel()
                         else rebuildZapList(keepCurrent = true)
                         applyMode()
@@ -580,6 +708,7 @@ class PlayerActivity : Activity() {
                         if (fresh && !firstRun) afterEpgLoaded()
                         else EpgManager.loadAsync(epgUrls) { afterEpgLoaded() }
                     }
+                    updateWidgetsVisibility()
                 }
             } catch (_: Throwable) {
                 runOnUiThread { toast("Ошибка загрузки данных") }
@@ -589,21 +718,78 @@ class PlayerActivity : Activity() {
 
     private fun afterEpgLoaded() {
         currentChannel?.let { if (panel == Panel.NONE && !playerReleased) updateOsdProgram(it) }
-        if (panel == Panel.BROWSER) (browserListView.adapter as? ChannelAdapter)?.notifyDataSetChanged()
+        if (panel == Panel.BROWSER) {
+            (browserListView.adapter as? ChannelAdapter)?.notifyDataSetChanged()
+            updatePreview(browserChannels.getOrNull(browserListView.selectedItemPosition))
+        }
         if (searchOverlay.visibility == View.VISIBLE && searchInput.text.toString().trim().length >= 2) doSearch()
     }
 
     private fun showSetupOverlay() {
-        val url = "http://${IpUtil.localIp()}:${WebConfigServer.PORT}"
-        setupUrl.text = url
-        showQr(url)
+        emptyStage.visibility = View.GONE
+        setupBackground.visibility = View.VISIBLE
         setupOverlay.visibility = View.VISIBLE
+        updateWidgetsVisibility()
+        updateSetupAddress()
+        handler.removeCallbacks(setupAddressTick)
+        handler.postDelayed(setupAddressTick, 4000)
         phoneBar.visibility = View.GONE
+        setupManual.requestFocus()
+    }
+
+    private fun updateSetupAddress() {
+        if (!webServerReady) startWebServer()
+        val ip = IpUtil.localIpOrNull()
+        if (webServerReady && ip != null) {
+            val url = "http://$ip:${WebConfigServer.PORT}"
+            setupUrl.text = url
+            if (setupQrUrl != url) {
+                showQr(url)
+                setupQrUrl = url
+            }
+        } else {
+            setupUrl.text = if (!webServerReady) "Страница настройки недоступна"
+                else "Подключите ТВ к сети и откройте этот экран снова"
+            qrImage.visibility = View.GONE
+            setupQrUrl = null
+        }
+    }
+
+    private fun showEmptyStage() {
+        currentChannel = null
+        if (!playerReleased) {
+            player.stop()
+            player.clearMediaItems()
+        }
+        videoPlaceholder.setImageResource(R.drawable.empty_stage)
+        videoPlaceholder.visibility = View.VISIBLE
+        playerView.visibility = View.GONE
+        emptyStage.visibility = View.VISIBLE
+    }
+
+    private fun deferSetup() {
+        handler.removeCallbacks(setupAddressTick)
+        setupOverlay.visibility = View.GONE
+        setupBackground.visibility = View.GONE
+        updateWidgetsVisibility()
+        if (playlists.isEmpty()) {
+            Store.setupDeferred = true
+            showEmptyStage()
+        }
+        openLeftMenu()
+    }
+
+    private fun openPlaylistSettings() {
+        setSelected = 1
+        openSettingsPanel()
+        setList.setSelection(1)
+        renderSetDetail(1, active = false)
     }
 
     private fun showPhoneSetup() {
         updatePhoneSetupStatus()
         phoneSetup.visibility = View.VISIBLE
+        updateWidgetsVisibility()
         phoneBar.visibility = View.GONE
     }
 
@@ -715,10 +901,15 @@ class PlayerActivity : Activity() {
         errorMsg.visibility = View.GONE
         handler.removeCallbacks(errorZapRunnable)
         handler.removeCallbacks(reconnectRunnable)
-        player.setMediaItem(Quality.mediaItem(ch.url))
-        player.prepare()
-        player.play()
-        startWatchdog()
+        if (!useVideoPlaceholder) {
+            player.setMediaItem(Quality.mediaItem(ch.url))
+            player.prepare()
+            player.play()
+            startWatchdog()
+        } else {
+            stopWatchdog()
+            player.clearMediaItems()
+        }
         // Сохраняем не только канал, но и контекст (плейлист + группа),
         // чтобы после перезапуска «Влево» вело в ту же группу, а не в «Все каналы».
         Store.saveWatchContext(ch.url, curPlaylistIdx, curCategory)
@@ -734,9 +925,13 @@ class PlayerActivity : Activity() {
         errorMsg.visibility = View.GONE
         handler.removeCallbacks(errorZapRunnable)
         handler.removeCallbacks(reconnectRunnable)
-        player.setMediaItem(MediaItem.fromUri(url))
-        player.prepare()
-        player.play()
+        if (!useVideoPlaceholder) {
+            player.setMediaItem(MediaItem.fromUri(url))
+            player.prepare()
+            player.play()
+        } else {
+            player.clearMediaItems()
+        }
         toast("Архив: $title")
     }
 
@@ -792,7 +987,7 @@ class PlayerActivity : Activity() {
     /** Переподключение к текущему каналу: без смены канала и без пересоздания плеера. */
     private val reconnectRunnable = Runnable {
         val ch = currentChannel
-        if (ch != null && !isCatchupPlayback) {
+        if (ch != null && !isCatchupPlayback && !useVideoPlaceholder) {
             if (playerReleased) buildPlayer()
             try {
                 player.setMediaItem(Quality.mediaItem(ch.url))
@@ -859,6 +1054,7 @@ class PlayerActivity : Activity() {
     }
 
     private fun startWatchdog() {
+        if (useVideoPlaceholder) return
         resetWatchdog()
         watchdogOn = true
         handler.removeCallbacks(watchdogTick)
@@ -968,9 +1164,18 @@ class PlayerActivity : Activity() {
     private val hideOsdRunnable = Runnable { hideOsd() }
 
     private fun hideOsd() {
-        osdPanel.visibility = View.GONE
-        osdButtons.visibility = View.GONE
+        handler.removeCallbacks(hideOsdRunnable)
+        if (osdPanel.visibility != View.VISIBLE) return
         osdButtonsShown = false
+        osdPanel.animate().cancel()
+        osdPanel.animate().translationY(dp(30).toFloat()).alpha(0f)
+            .setDuration(340).setInterpolator(easeInReverse)
+            .withEndAction {
+                osdPanel.visibility = View.GONE
+                osdPanel.translationY = 0f
+                osdPanel.alpha = 1f
+                osdButtons.visibility = View.GONE
+            }.start()
     }
 
     private var osdButtonsShown = false
@@ -1001,6 +1206,10 @@ class PlayerActivity : Activity() {
         if (osdPanel.visibility != View.VISIBLE) {
             osdPanel.visibility = View.VISIBLE
             animOsdUp(osdPanel)
+        } else if (osdPanel.alpha < 1f || osdPanel.translationY != 0f) {
+            osdPanel.animate().cancel()
+            osdPanel.animate().translationY(0f).alpha(1f)
+                .setDuration(340).setInterpolator(easeOut).start()
         }
         if (withButtons) showOsdButtons() else { osdButtons.visibility = View.GONE; osdButtonsShown = false }
         restartOsdTimer()
@@ -1073,8 +1282,121 @@ class PlayerActivity : Activity() {
     private val clockTick = object : Runnable {
         override fun run() {
             if (osdPanel.visibility == View.VISIBLE) osdClock.text = timeFmt.format(Date())
+            updateWidgetClock()
+            val now = System.currentTimeMillis()
+            if (Store.weatherWidgetEnabled && now >= widgetNextRefreshAt) refreshWidgetData()
             handler.postDelayed(this, 1000)
         }
+    }
+
+    private var widgetNextRefreshAt = 0L
+
+    private fun updateWidgetsVisibility() {
+        if (!::widgetBar.isInitialized || !::setupOverlay.isInitialized) return
+        val show = panel == Panel.NONE && setupOverlay.visibility != View.VISIBLE &&
+            phoneSetup.visibility != View.VISIBLE && modePicker.visibility != View.VISIBLE &&
+            screensaver.visibility != View.VISIBLE &&
+            (Store.clockWidgetEnabled || Store.weatherWidgetEnabled)
+        if (widgetVisibilityTarget == show) return
+        widgetVisibilityTarget = show
+        widgetBar.animate().cancel()
+        if (show) {
+            if (widgetBar.visibility != View.VISIBLE) {
+                widgetBar.alpha = 0f
+                widgetBar.visibility = View.VISIBLE
+            }
+            widgetBar.animate().alpha(1f).setDuration(340)
+                .setInterpolator(easeOut).withLayer().start()
+        } else if (widgetBar.visibility == View.VISIBLE) {
+            widgetBar.animate().alpha(0f).setDuration(300)
+                .setInterpolator(easeInReverse).withLayer()
+                .withEndAction {
+                    if (widgetVisibilityTarget == false) {
+                        widgetBar.visibility = View.GONE
+                        widgetBar.alpha = 1f
+                    }
+                }.start()
+        }
+    }
+
+    private fun widgetSize(view: TextView, size: String) {
+        val font = when (size) {
+            "S" -> 18f
+            "L" -> 30f
+            else -> 24f
+        }
+        view.textSize = font
+    }
+
+    private fun refreshWidgetUi() {
+        if (!::widgetBar.isInitialized) return
+        val onRight = Store.widgetSide == "right"
+        widgetBar.gravity = Gravity.TOP or if (onRight) Gravity.RIGHT else Gravity.LEFT
+        widgetBar.setPadding(if (onRight) 0 else dp(12), dp(8),
+            if (onRight) dp(12) else 0, 0)
+        widgetClock.visibility = if (Store.clockWidgetEnabled) View.VISIBLE else View.GONE
+        widgetWeather.visibility = if (Store.weatherWidgetEnabled) View.VISIBLE else View.GONE
+        widgetSeparator.visibility = if (Store.clockWidgetEnabled && Store.weatherWidgetEnabled)
+            View.VISIBLE else View.GONE
+        widgetSize(widgetClock, Store.clockWidgetSize)
+        widgetSize(widgetWeather, Store.weatherWidgetSize)
+        widgetSeparator.textSize = maxOf(
+            when (Store.clockWidgetSize) { "S" -> 18f; "L" -> 30f; else -> 24f },
+            when (Store.weatherWidgetSize) { "S" -> 18f; "L" -> 30f; else -> 24f }
+        )
+        val temp = Store.weatherWidgetTemp
+        widgetWeather.text = if (temp == Int.MIN_VALUE) "—°" else
+            "${WidgetWeather.symbol(Store.weatherWidgetCode, Store.weatherWidgetDay)} ${if (temp > 0) "+" else ""}$temp°"
+        widgetWeather.contentDescription = "Погода ${widgetWeatherPlaceName.ifBlank { Store.weatherWidgetCity.ifBlank { "по сети" } }}: ${widgetWeather.text}"
+        osdClock.visibility = if (Store.clockWidgetEnabled) View.GONE else View.VISIBLE
+        updateWidgetClock()
+        updateWidgetsVisibility()
+    }
+
+    private fun updateWidgetClock() {
+        if (!::widgetClock.isInitialized || !Store.clockWidgetEnabled) return
+        val zoneId = Store.clockWidgetTimeZone.ifBlank { networkWidgetPlace?.timeZone.orEmpty() }
+        val zone = if (zoneId.isNotBlank()) TimeZone.getTimeZone(zoneId) else TimeZone.getDefault()
+        widgetClock.text = SimpleDateFormat("HH:mm", Locale.getDefault()).apply { timeZone = zone }.format(Date())
+        widgetClock.contentDescription = "Время ${widgetClock.text}, часовой пояс ${zone.id}"
+    }
+
+    private fun refreshWidgetData(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        widgetNextRefreshAt = now + 30L * 60 * 1000
+        val manualCity = Store.weatherWidgetCity
+        val manualLat = Store.weatherWidgetLatitude
+        val manualLon = Store.weatherWidgetLongitude
+        val needWeather = Store.weatherWidgetEnabled && (force ||
+            Store.weatherWidgetTemp == Int.MIN_VALUE || now - Store.weatherWidgetUpdatedAt >= 30L * 60 * 1000)
+        val needNetwork = networkWidgetPlace == null && (Store.clockWidgetTimeZone.isBlank() ||
+            (Store.weatherWidgetEnabled && manualCity.isBlank()))
+        if (!needWeather && !needNetwork) return
+        val generation = ++widgetRequestGeneration
+        Thread {
+            val detected = if (needNetwork) runCatching { WidgetWeather.detectPlace() }.getOrNull() else null
+            val place = if (manualCity.isNotBlank() && manualLat.isFinite() && manualLon.isFinite())
+                WidgetWeather.Place(manualCity, manualLat.toDouble(), manualLon.toDouble(), "")
+            else detected ?: networkWidgetPlace
+            val conditions = if (needWeather && place != null)
+                runCatching { WidgetWeather.current(place) }.getOrNull() else null
+            runOnUiThread {
+                if (generation != widgetRequestGeneration || isFinishing) return@runOnUiThread
+                if (detected != null) networkWidgetPlace = detected
+                if (place != null) widgetWeatherPlaceName = place.name
+                if (conditions != null) {
+                    Store.weatherWidgetTemp = conditions.temperature
+                    Store.weatherWidgetCode = conditions.code
+                    Store.weatherWidgetDay = conditions.isDay
+                    Store.weatherWidgetUpdatedAt = System.currentTimeMillis()
+                } else if (needWeather) widgetNextRefreshAt = System.currentTimeMillis() + 5L * 60 * 1000
+                refreshWidgetUi()
+                if (::setDetail.isInitialized && panel == Panel.SETTINGS &&
+                    setItems.getOrNull(setSelected)?.kind == "widgets" && !setDetailActive) {
+                    renderSetDetail(setSelected, active = false)
+                }
+            }
+        }.start()
     }
 
     private val epgRefreshTick = object : Runnable {
@@ -1101,8 +1423,9 @@ class PlayerActivity : Activity() {
         }
         if (phoneSetup.visibility == View.VISIBLE) return super.dispatchKeyEvent(event)
         if (searchOverlay.visibility == View.VISIBLE) {
+            if (searchReturning) return true
             if (event.action == KeyEvent.ACTION_DOWN && event.keyCode == KeyEvent.KEYCODE_BACK) {
-                closeSearch(); return true
+                returnSearchToLeftMenu(); return true
             }
             return super.dispatchKeyEvent(event)
         }
@@ -1111,15 +1434,14 @@ class PlayerActivity : Activity() {
             return true
         }
         if (setupOverlay.visibility == View.VISIBLE) {
-            if (event.action == KeyEvent.ACTION_DOWN &&
-                (event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || event.keyCode == KeyEvent.KEYCODE_ENTER)) {
-                showManualUrlDialog(fromPhoneSetup = false); return true
-            }
-            if (event.action == KeyEvent.ACTION_DOWN && event.keyCode == KeyEvent.KEYCODE_BACK && playlists.isNotEmpty()) {
-                setupOverlay.visibility = View.GONE; return true
+            if (event.action == KeyEvent.ACTION_DOWN && event.keyCode == KeyEvent.KEYCODE_BACK) {
+                deferSetup(); return true
             }
             return super.dispatchKeyEvent(event)
         }
+
+        if (settingsReturning) return true
+        if (menuMorphRunning && event.action == KeyEvent.ACTION_DOWN) finishMenuMorph()
 
         return when (panel) {
             Panel.NONE -> handleFullscreenKey(event)
@@ -1127,34 +1449,59 @@ class PlayerActivity : Activity() {
                 val focus = currentFocus
                 val inCatList = focus === catList || (focus?.parent === catList)
                 if (event.action == KeyEvent.ACTION_DOWN) {
+                    if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+                        closeLeftMenuAnimated(); return true
+                    }
                     if (event.keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-                        if (event.repeatCount == 0 && focus !== settingsRow) {
-                            upHeldFired = false
-                            handler.postDelayed(upHoldRunnable, 1000)
+                        if (event.repeatCount == 0) {
+                            menuUpPressCategoryIndex = if (inCatList) catList.selectedItemPosition else -1
+                            if (menuUpPressCategoryIndex >= 0) menuReturnCategoryIndex = menuUpPressCategoryIndex
+                        } else {
+                            if (menuUpPressCategoryIndex >= 0) menuReturnCategoryIndex = menuUpPressCategoryIndex
+                            settingsRow.requestFocus()
+                            return true
                         }
                         return super.dispatchKeyEvent(event)
+                    }
+                    if (event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                        if (event.repeatCount == 0) {
+                            menuDownHoldEligible = focus === settingsRow || focus === searchRow || focus === favRow
+                            menuDownHoldActivated = false
+                        } else if (menuDownHoldEligible) {
+                            if (!menuDownHoldActivated && catOnlyList.isNotEmpty()) {
+                                menuDownHoldActivated = true
+                                catList.requestFocus()
+                                catList.setSelection(menuReturnCategoryIndex.coerceIn(0, catOnlyList.lastIndex))
+                            }
+                            return true
+                        }
                     }
                     if (inCatList) {
                         val pos = catList.selectedItemPosition
                         when (event.keyCode) {
-                            KeyEvent.KEYCODE_DPAD_LEFT -> { closePanels(); return true }
+                            KeyEvent.KEYCODE_DPAD_LEFT -> { closeLeftMenuAnimated(); return true }
                             KeyEvent.KEYCODE_DPAD_RIGHT,
                             KeyEvent.KEYCODE_DPAD_CENTER,
                             KeyEvent.KEYCODE_ENTER -> { activateCatOnly(pos); return true }
-                            KeyEvent.KEYCODE_BACK -> { closePanels(); return true }
+                            KeyEvent.KEYCODE_BACK -> { closeLeftMenuAnimated(); return true }
                         }
                     }
                 }
-                if (event.action == KeyEvent.ACTION_UP && event.keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-                    handler.removeCallbacks(upHoldRunnable)
+                if (event.action == KeyEvent.ACTION_UP) {
+                    if (event.keyCode == KeyEvent.KEYCODE_DPAD_UP) menuUpPressCategoryIndex = -1
+                    if (event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                        menuDownHoldEligible = false
+                        menuDownHoldActivated = false
+                    }
                 }
                 super.dispatchKeyEvent(event)
             }
             Panel.BROWSER -> handleBrowserKey(event)
             Panel.RIGHT -> {
                 if (event.action == KeyEvent.ACTION_DOWN &&
-                    (event.keyCode == KeyEvent.KEYCODE_BACK || event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT)) {
-                    closePanels(); return true
+                    (event.keyCode == KeyEvent.KEYCODE_BACK || event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
+                        event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT)) {
+                    closeEpgPanel(); return true
                 }
                 super.dispatchKeyEvent(event)
             }
@@ -1216,43 +1563,80 @@ class PlayerActivity : Activity() {
         return id in OSD_BUTTON_IDS
     }
 
-    private var upHeldFired = false
-
-    private val upHoldRunnable = Runnable {
-        upHeldFired = true
-        if (panel == Panel.LEFT) {
-            settingsRow.requestFocus()
-        }
-    }
-
     private val longPressRunnable = Runnable { longPressFired = true; gotoPrevChannel() }
 
     private fun updateStageDim() {
         if (!::stageDim.isInitialized) return
+        updateWidgetsVisibility()
         val anyPanelOpen =
             (::leftMenu.isInitialized && leftMenu.visibility == View.VISIBLE) ||
             (::browserOverlay.isInitialized && browserOverlay.visibility == View.VISIBLE) ||
             (::rightPanel.isInitialized && rightPanel.visibility == View.VISIBLE) ||
             (::searchOverlay.isInitialized && searchOverlay.visibility == View.VISIBLE) ||
             (::settingsPanel.isInitialized && settingsPanel.visibility == View.VISIBLE)
-        stageDim.visibility = if (anyPanelOpen) View.VISIBLE else View.GONE
+        if (::emptyStage.isInitialized) {
+            emptyStage.visibility = if (playlists.isEmpty() && !anyPanelOpen &&
+                setupOverlay.visibility != View.VISIBLE) View.VISIBLE else View.GONE
+        }
+        if (anyPanelOpen) {
+            if (stageDim.visibility != View.VISIBLE) {
+                stageDim.animate().cancel()
+                stageDim.alpha = 0f
+                stageDim.visibility = View.VISIBLE
+                stageDim.animate().alpha(1f).setDuration(300).setInterpolator(easeOut).start()
+            } else if (stageDim.alpha < 1f) {
+                stageDim.animate().cancel()
+                stageDim.animate().alpha(1f).setDuration(300).setInterpolator(easeOut).start()
+            }
+        } else {
+            stageDim.animate().cancel()
+            stageDim.visibility = View.GONE
+            stageDim.alpha = 1f
+        }
     }
 
     private fun closePanels() {
+        menuWidthAnim?.cancel()
+        cancelMenuMorph()
+        epgClosing = false
+        for (view in listOf(browserOverlay, browserList, previewBackdrop, previewCard,
+            settingsPanel, setListPanel, setDetailScroll, leftMenu, rightPanel)) {
+            view.animate().cancel()
+            view.alpha = 1f
+            view.translationX = 0f
+            view.translationY = 0f
+        }
         browserOverlay.visibility = View.GONE
         leftMenu.visibility = View.GONE
         rightPanel.visibility = View.GONE
         if (::settingsPanel.isInitialized) settingsPanel.visibility = View.GONE
         if (::leftMenu.isInitialized) leftMenu.visibility = View.GONE
         setDetailActive = false
+        settingsReturning = false
+        browserOpenedFromLeft = false
         panel = Panel.NONE
         updateStageDim()
         if (isPhone && currentChannel != null) phoneBar.visibility = View.VISIBLE
     }
 
+    private fun closeLeftMenuAnimated() {
+        if (leftMenu.visibility != View.VISIBLE) { closePanels(); return }
+        panel = Panel.NONE
+        stageDim.animate().cancel()
+        stageDim.animate().alpha(0f).setDuration(300).setInterpolator(easeInReverse).start()
+        leftMenu.animate().cancel()
+        leftMenu.animate().translationX(-dp(34).toFloat()).alpha(0f)
+            .setDuration(300).setInterpolator(easeInReverse)
+            .withEndAction { if (panel == Panel.NONE) closePanels() }.start()
+    }
+
     private fun setFixedTopCompact(compact: Boolean) {
         if (!::leftFixedTop.isInitialized) return
         val vis = if (compact) View.GONE else View.VISIBLE
+        // В узкой панели нет скроллбара, поэтому его место отдаём строкам.
+        // Ширина строки остаётся достаточной для иконки с теми же отступами.
+        catList.setPadding(catList.paddingLeft, catList.paddingTop,
+            if (compact) 0 else dp(14), catList.paddingBottom)
         
         settingsRow.findViewById<TextView>(R.id.catName)?.visibility = vis
         searchRow.findViewById<TextView>(R.id.catName)?.visibility = vis
@@ -1282,7 +1666,7 @@ class PlayerActivity : Activity() {
         }
     }
 
-    private fun showRail(activeOverrideType: String? = null) {
+    private fun showRail(activeOverrideType: String? = null, fromFullscreenBrowser: Boolean = false) {
         val wasVisible = leftMenu.visibility == View.VISIBLE
         leftMenu.visibility = View.VISIBLE
         menuCollapsed = true
@@ -1301,9 +1685,150 @@ class PlayerActivity : Activity() {
             animateMenuWidth(dp(MENU_W_RAIL), dp(MENU_PAD_RAIL))
         } else {
             setMenuWidth(dp(MENU_W_RAIL), dp(MENU_PAD_RAIL))
-            animPanelInLeft(leftMenu)
+            if (fromFullscreenBrowser) animBrowserRailIn(leftMenu) else animPanelInLeft(leftMenu)
         }
         updateStageDim()
+    }
+
+    private fun cancelMenuMorph() {
+        menuMorphGeneration++
+        menuMorphRunning = false
+        menuMorphComplete = null
+        menuMorphAnimator?.cancel()
+        menuMorphAnimator = null
+        menuFoldSurface.animate().cancel()
+        menuFoldSurface.visibility = View.GONE
+        menuFoldContent.visibility = View.GONE
+        menuFoldContent.setImageDrawable(null)
+        menuFoldContent.clipBounds = null
+        menuFoldContent.clipToOutline = false
+        menuFoldContent.outlineProvider = ViewOutlineProvider.BACKGROUND
+        menuFoldContent.alpha = 1f
+        leftMenu.animate().cancel()
+        leftMenu.alpha = 1f
+        leftMenu.clipBounds = null
+        leftMenu.clipToOutline = false
+        leftMenu.outlineProvider = ViewOutlineProvider.BACKGROUND
+        leftMenu.setLayerType(View.LAYER_TYPE_NONE, null)
+    }
+
+    private fun finishMenuMorph() {
+        if (!menuMorphRunning) return
+        menuMorphGeneration++
+        menuMorphRunning = false
+        menuMorphAnimator?.cancel()
+        menuMorphAnimator = null
+        menuFoldSurface.animate().cancel()
+        leftMenu.animate().cancel()
+        val complete = menuMorphComplete
+        menuMorphComplete = null
+        leftMenu.visibility = View.VISIBLE
+        leftMenu.translationX = 0f
+        leftMenu.alpha = 1f
+        leftMenu.clipBounds = null
+        leftMenu.clipToOutline = false
+        leftMenu.outlineProvider = ViewOutlineProvider.BACKGROUND
+        leftMenu.setLayerType(View.LAYER_TYPE_NONE, null)
+        menuFoldContent.visibility = View.GONE
+        menuFoldContent.setImageDrawable(null)
+        menuFoldContent.clipBounds = null
+        menuFoldContent.clipToOutline = false
+        menuFoldContent.outlineProvider = ViewOutlineProvider.BACKGROUND
+        menuFoldContent.alpha = 1f
+        menuFoldSurface.visibility = View.GONE
+        complete?.invoke()
+    }
+
+    private class RightCornerOutline(private val radius: Int, var right: Int) : ViewOutlineProvider() {
+        override fun getOutline(view: View, outline: Outline) {
+            // Левые углы находятся за краем view, поэтому видимый левый край остаётся прямым.
+            outline.setRoundRect(-radius, 0, right, view.height, radius.toFloat())
+        }
+    }
+
+    private fun morphMenu(toRail: Boolean, prepareTarget: () -> Unit, onComplete: () -> Unit = {}) {
+        menuWidthAnim?.cancel()
+        if (menuMorphRunning) finishMenuMorph()
+        menuFoldSurface.animate().cancel()
+        leftMenu.animate().cancel()
+        leftMenu.alpha = 1f
+        leftMenu.clipBounds = null
+        val sourceWidth = leftMenu.width
+        val sourceHeight = leftMenu.height
+        if (sourceWidth <= 0 || sourceHeight <= 0) {
+            prepareTarget()
+            onComplete()
+            return
+        }
+
+        val sourceImage = Bitmap.createBitmap(sourceWidth, sourceHeight, Bitmap.Config.ARGB_8888)
+        leftMenu.draw(Canvas(sourceImage))
+        menuFoldContent.layoutParams = menuFoldContent.layoutParams.apply { width = sourceWidth }
+        menuFoldContent.setImageBitmap(sourceImage)
+        menuFoldContent.clipBounds = Rect(0, 0, sourceWidth, sourceHeight)
+        menuFoldContent.alpha = 1f
+        menuFoldContent.visibility = View.VISIBLE
+
+        prepareTarget()
+        menuMorphRunning = true
+        menuMorphComplete = onComplete
+        val generation = ++menuMorphGeneration
+        val fromWidth = dp(if (toRail) MENU_W_FULL else MENU_W_RAIL)
+        val toWidth = dp(if (toRail) MENU_W_RAIL else MENU_W_FULL)
+        val sourceOutline = RightCornerOutline(dp(16), sourceWidth)
+        val targetOutline = RightCornerOutline(dp(16), if (toRail) toWidth else fromWidth)
+        menuFoldContent.outlineProvider = sourceOutline
+        menuFoldContent.clipToOutline = true
+        leftMenu.outlineProvider = targetOutline
+        leftMenu.clipToOutline = true
+        menuFoldSurface.pivotX = 0f
+        menuFoldSurface.scaleX = fromWidth.toFloat() / dp(MENU_W_FULL)
+        menuFoldSurface.visibility = View.VISIBLE
+        leftMenu.alpha = 0f
+        if (!toRail) leftMenu.clipBounds = Rect(0, 0, fromWidth, leftMenu.height)
+        leftMenu.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+
+        menuMorphAnimator = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 380
+            interpolator = menuFoldEase
+            addUpdateListener { animator ->
+                val progress = animator.animatedValue as Float
+                val visibleWidth = (fromWidth + (toWidth - fromWidth) * progress).toInt()
+                menuFoldSurface.scaleX = visibleWidth.toFloat() / dp(MENU_W_FULL)
+                if (toRail) {
+                    menuFoldContent.clipBounds = Rect(0, 0, visibleWidth, sourceHeight)
+                    sourceOutline.right = visibleWidth
+                    menuFoldContent.invalidateOutline()
+                } else {
+                    leftMenu.clipBounds = Rect(0, 0, visibleWidth, leftMenu.height)
+                    targetOutline.right = visibleWidth
+                    leftMenu.invalidateOutline()
+                }
+                menuFoldContent.alpha = 1f - progress
+                leftMenu.alpha = progress
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    if (generation == menuMorphGeneration && menuMorphRunning) finishMenuMorph()
+                }
+            })
+            start()
+        }
+    }
+
+    private fun transitionMenuToRail(activeOverrideType: String? = null) {
+        val selectedPos = catList.selectedItemPosition
+        val selectedTop = catList.getChildAt(selectedPos - catList.firstVisiblePosition)?.top
+        morphMenu(toRail = true, prepareTarget = {
+            menuCollapsed = true
+            setMenuWidth(dp(MENU_W_RAIL), dp(MENU_PAD_RAIL))
+            setFixedTopCompact(true)
+            refreshRail(activeOverrideType, selectedTop)
+            catList.isFocusable = false
+            catList.isFocusableInTouchMode = false
+            catList.isEnabled = false
+            catList.isVerticalScrollBarEnabled = false
+        })
     }
 
     private fun expandMenu(animate: Boolean) {
@@ -1325,14 +1850,14 @@ class PlayerActivity : Activity() {
     private fun setMenuWidth(w: Int, pad: Int) {
         menuWidthAnim?.cancel()
         leftMenu.layoutParams = leftMenu.layoutParams.apply { width = w }
-        leftMenu.setPadding(pad, leftMenu.paddingTop, pad, leftMenu.paddingBottom)
+        leftMenu.setPadding(dp(MENU_PAD_FULL + 8), leftMenu.paddingTop, pad, leftMenu.paddingBottom)
         leftMenu.requestLayout()
     }
 
     private fun animateMenuWidth(toW: Int, toPad: Int) {
         menuWidthAnim?.cancel()
         val fromW = leftMenu.width.takeIf { it > 0 } ?: leftMenu.layoutParams.width
-        val fromPad = leftMenu.paddingLeft
+        val fromPad = leftMenu.paddingRight
         if (fromW == toW && fromPad == toPad) return
         val a = android.animation.ValueAnimator.ofFloat(0f, 1f)
         a.duration = 360
@@ -1342,20 +1867,52 @@ class PlayerActivity : Activity() {
             val w = (fromW + (toW - fromW) * t).toInt()
             val pad = (fromPad + (toPad - fromPad) * t).toInt()
             leftMenu.layoutParams = leftMenu.layoutParams.apply { width = w }
-            leftMenu.setPadding(pad, leftMenu.paddingTop, pad, leftMenu.paddingBottom)
+            leftMenu.setPadding(dp(MENU_PAD_FULL + 8), leftMenu.paddingTop, pad, leftMenu.paddingBottom)
             leftMenu.requestLayout()
         }
         menuWidthAnim = a
         a.start()
     }
 
+    private fun browserSlideDistance(): Float {
+        val params = browserList.layoutParams as FrameLayout.LayoutParams
+        val listWidth = browserList.width.takeIf { it > 0 } ?: params.width
+        val listRight = params.leftMargin + listWidth
+        val menuRight = minOf(dp(MENU_W_FULL), (resources.displayMetrics.widthPixels * 0.85f).toInt())
+        // В начале перехода правый край списка скрыт под широким левым меню.
+        return (listRight - menuRight + dp(12)).coerceAtLeast(dp(160)).toFloat()
+    }
+
+    private fun settingsListSlideDistance(): Float {
+        val params = setListPanel.layoutParams as FrameLayout.LayoutParams
+        val listWidth = setListPanel.width.takeIf { it > 0 } ?: params.width
+        val listRight = params.leftMargin + listWidth
+        val menuRight = minOf(dp(MENU_W_FULL), (resources.displayMetrics.widthPixels * 0.85f).toInt())
+        return (listRight - menuRight + dp(12)).coerceAtLeast(dp(160)).toFloat()
+    }
+
+    private fun settingsDetailSlideDistance(): Float {
+        val detailParams = setDetailScroll.layoutParams as FrameLayout.LayoutParams
+        val detailRight = resources.displayMetrics.widthPixels - detailParams.rightMargin
+        val menuRight = minOf(dp(MENU_W_FULL), (resources.displayMetrics.widthPixels * 0.85f).toInt())
+        // Правая панель целиком скрыта под широким меню, пока средняя панель начинает движение.
+        return (detailRight - menuRight + dp(12)).coerceAtLeast(dp(160)).toFloat()
+    }
+
     private fun openChannelBrowser() {
         if (zapList.isEmpty()) { openLeftMenu(); return }
+        val fromLeftMenu = panel == Panel.LEFT && leftMenu.visibility == View.VISIBLE && !menuCollapsed
+        browserOpenedFromLeft = fromLeftMenu
         panel = Panel.BROWSER
         phoneBar.visibility = View.GONE
         channelBeforeBrowse = currentChannel
         browserChannels = zapList
         browserHeader.text = currentZapTitle()
+        IconFont.apply(browserHeaderIcon, when {
+            curPlaylistIdx == -1 -> "star"
+            curCategory == null -> "apps"
+            else -> GroupIcons.iconFor(curCategory!!)
+        })
         browserPlName.text = (if (curPlaylistIdx == -1) "Избранное"
             else playlists.getOrNull(curPlaylistIdx)?.name ?: "").uppercase()
         val adapter = ChannelAdapter(this, browserChannels, showNow = true)
@@ -1368,36 +1925,53 @@ class PlayerActivity : Activity() {
         }
         browserListView.setOnItemSelectedListener(object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(p: android.widget.AdapterView<*>?, v: View?, pos: Int, id: Long) {
-                val a = browserListView.adapter as? ChannelAdapter
-                if (a != null) {
-                    if (a.actionFocused) {
-                        a.actionFocused = false
-                        browserActionFocused = false
-                        browserListView.setSelector(R.drawable.list_focus)
-                    }
-                    a.selectedPos = pos
-                }
-                updatePreview(browserChannels.getOrNull(pos))
-                if (Store.livePreview) scheduleLivePreview(browserChannels.getOrNull(pos))
+                if (pos == browserListView.selectedItemPosition) syncBrowserSelection(pos)
             }
             override fun onNothingSelected(p: android.widget.AdapterView<*>?) {}
         })
         browserActionFocused = false
         adapter.actionFocused = false
         browserListView.setSelector(R.drawable.list_focus)
+        browserOverlay.animate().cancel()
+        previewBackdrop.animate().cancel()
+        previewBackdrop.alpha = 0f
         browserOverlay.visibility = View.VISIBLE
-        animFadeIn(browserOverlay)
-        showRail()
-        animRailIn(browserList)
-        animOsdUp(previewCard)
+        browserOverlay.alpha = 1f
+        previewBackdrop.animate().alpha(1f)
+            .setDuration(if (fromLeftMenu) 380 else 300)
+            .setInterpolator(if (fromLeftMenu) easeOut else easeRailReturn).start()
+        browserList.animate().cancel()
+        if (fromLeftMenu) {
+            browserList.translationX = -browserSlideDistance()
+            browserList.alpha = 0f
+            browserList.animate().translationX(0f).alpha(1f)
+                .setDuration(380).setInterpolator(menuFoldEase).withLayer().start()
+        } else {
+            animBrowserRailIn(browserList)
+        }
+        if (fromLeftMenu) transitionMenuToRail() else showRail(fromFullscreenBrowser = true)
+        if (fromLeftMenu) animOsdUp(previewCard) else animBrowserRailIn(previewCard)
         browserListView.requestFocus()
         val start = browserChannels.indexOfFirst { it.url == currentChannel?.url }.coerceAtLeast(0)
-        adapter.selectedPos = start
         browserListView.setSelection(start)
-        updatePreview(browserChannels.getOrNull(start))
+        syncBrowserSelection(start)
     }
 
-    private fun refreshRail(activeOverrideType: String? = null) {
+    private fun syncBrowserSelection(pos: Int) {
+        val channel = browserChannels.getOrNull(pos) ?: return
+        val adapter = browserListView.adapter as? ChannelAdapter ?: return
+        if (adapter.actionFocused) {
+            adapter.actionFocused = false
+            browserActionFocused = false
+            browserListView.setSelector(R.drawable.list_focus)
+        }
+        if (adapter.selectedPos == pos) return
+        adapter.selectedPos = pos
+        updatePreview(channel)
+        if (Store.livePreview) scheduleLivePreview(channel)
+    }
+
+    private fun refreshRail(activeOverrideType: String? = null, selectedTop: Int? = null) {
         val plIdx = if (curPlaylistIdx >= 0) curPlaylistIdx else lastRealPlaylistIdx
         val items = buildCatOnlyList(plIdx)
         val adapter = CategoryAdapter(this, items, compact = true)
@@ -1411,7 +1985,10 @@ class PlayerActivity : Activity() {
         adapter.activePos = active
         catOnlyList = items
         catList.adapter = adapter
-        if (active >= 0) catList.setSelection(active)
+        if (active >= 0) {
+            if (selectedTop != null) catList.setSelectionFromTop(active, selectedTop)
+            else catList.setSelection(active)
+        }
 
         val isSettings = (activeOverrideType == "SETTINGS")
         val isSearch = (activeOverrideType == "SEARCH")
@@ -1436,7 +2013,58 @@ class PlayerActivity : Activity() {
         browserListView.setSelector(if (focused) R.drawable.list_focus_delactive else R.drawable.list_focus)
     }
 
+    private fun pageBrowserSelection(direction: Int) {
+        if (browserChannels.isEmpty()) return
+        if (browserActionFocused) setBrowserActionFocused(false)
+        val pos = browserListView.selectedItemPosition.coerceAtLeast(0)
+        val next = (pos + direction * 10).coerceIn(0, browserChannels.lastIndex)
+        if (next == pos) return
+        val rowHeight = browserListView.selectedView?.height?.takeIf { it > 0 } ?: dp(72)
+        val centeredTop = ((browserListView.height - rowHeight) / 2).coerceAtLeast(0)
+        browserListView.setSelectionFromTop(next, centeredTop)
+        syncBrowserSelection(next)
+    }
+
+    private fun handleRemoteHold(keyCode: Int) {
+        val direction = when (keyCode) {
+            KeyEvent.KEYCODE_DPAD_UP -> -1
+            KeyEvent.KEYCODE_DPAD_DOWN -> 1
+            else -> return
+        }
+        when (panel) {
+            Panel.BROWSER -> pageBrowserSelection(direction)
+            Panel.LEFT -> {
+                if (direction < 0) {
+                    val focus = currentFocus
+                    if (focus === catList || focus?.parent === catList) {
+                        menuReturnCategoryIndex = catList.selectedItemPosition.coerceAtLeast(0)
+                    }
+                    settingsRow.requestFocus()
+                } else if (currentFocus === settingsRow || currentFocus === searchRow || currentFocus === favRow) {
+                    if (catOnlyList.isNotEmpty()) {
+                        catList.requestFocus()
+                        catList.setSelection(menuReturnCategoryIndex.coerceIn(0, catOnlyList.lastIndex))
+                    }
+                }
+            }
+            else -> Unit
+        }
+    }
+
     private fun handleBrowserKey(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_UP &&
+            (event.keyCode == KeyEvent.KEYCODE_DPAD_UP || event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN)) {
+            if (!browserHoldStarted && browserChannels.isNotEmpty()) {
+                if (browserActionFocused) setBrowserActionFocused(false)
+                // Передаём короткое нажатие ListView только при отпускании:
+                // так удержание не даёт лишнего шага, а обычная навигация
+                // сохраняет естественное движение рамки по видимым строкам.
+                super.dispatchKeyEvent(KeyEvent.changeAction(event, KeyEvent.ACTION_DOWN))
+            }
+            lastBrowserHoldJumpMs = 0L
+            browserHoldStarted = false
+            return super.dispatchKeyEvent(event)
+        }
         if (event.action != KeyEvent.ACTION_DOWN) return super.dispatchKeyEvent(event)
         val pos = browserListView.selectedItemPosition
 
@@ -1465,7 +2093,6 @@ class PlayerActivity : Activity() {
                     return true
                 }
                 handler.removeCallbacks(livePreviewRunnable)
-                browserOverlay.visibility = View.GONE
                 openLeftMenu()
                 return true
             }
@@ -1480,13 +2107,26 @@ class PlayerActivity : Activity() {
                     setBrowserActionFocused(false)
                     return true
                 }
-                cancelBrowse()
+                if (browserOpenedFromLeft) {
+                    handler.removeCallbacks(livePreviewRunnable)
+                    openLeftMenu()
+                } else cancelBrowse()
                 return true
             }
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
-                if (browserActionFocused) {
-                    setBrowserActionFocused(false)
+                if (browserActionFocused) setBrowserActionFocused(false)
+                if (browserChannels.isNotEmpty()) {
+                    val direction = if (event.keyCode == KeyEvent.KEYCODE_DPAD_UP) -1 else 1
+                    if (event.repeatCount > 0) {
+                        if (event.eventTime - lastBrowserHoldJumpMs >= 250L) {
+                            lastBrowserHoldJumpMs = event.eventTime
+                            browserHoldStarted = true
+                            pageBrowserSelection(direction)
+                        }
+                        return true
+                    }
                 }
+                return true
             }
         }
         return super.dispatchKeyEvent(event)
@@ -1525,7 +2165,11 @@ class PlayerActivity : Activity() {
             channelBeforeBrowse != null && currentChannel?.url != channelBeforeBrowse?.url) {
             channelBeforeBrowse?.let { play(it) }
         }
-        closeWithRailOut(browserList, previewCard) { closePanels() }
+        stageDim.animate().cancel()
+        stageDim.animate().alpha(0f).setDuration(300).setInterpolator(easeInReverse).start()
+        previewBackdrop.animate().cancel()
+        previewBackdrop.animate().alpha(0f).setDuration(300).setInterpolator(easeRailOut).start()
+        closeWithRailOut(browserList, previewCard, leftMenu) { closePanels() }
     }
 
     // ИСПРАВЛЕНИЕ: Мы жестко фиксируем высоту правой панели,
@@ -1545,11 +2189,15 @@ class PlayerActivity : Activity() {
             prevProgress.visibility = View.VISIBLE
             prevRemain.text = "${timeFmt.format(Date(cur.start))}–${timeFmt.format(Date(cur.stop))}  •  ${remainText(cur.stop)}"
             prevRemain.visibility = View.VISIBLE
+            prevDesc.text = cur.desc.trim()
+            prevDesc.visibility = if (cur.desc.isBlank()) View.GONE else View.VISIBLE
         } else {
             prevNow.text = if (EpgManager.loading) "Программа загружается…" else "Нет данных о передаче"
             prevProgress.visibility = View.INVISIBLE
             prevRemain.text = " "
             prevRemain.visibility = View.INVISIBLE
+            prevDesc.text = ""
+            prevDesc.visibility = View.GONE
         }
         prevNext.text = if (next != null) "Далее: ${timeFmt.format(Date(next.start))} ${next.title}" else " "
     }
@@ -1565,7 +2213,9 @@ class PlayerActivity : Activity() {
         val ch = pendingPreview ?: return@Runnable
         if (panel == Panel.BROWSER && currentChannel?.url != ch.url) {
             if (playerReleased) buildPlayer()
-            player.setMediaItem(Quality.mediaItem(ch.url)); player.prepare(); player.play()
+            if (!useVideoPlaceholder) {
+                player.setMediaItem(Quality.mediaItem(ch.url)); player.prepare(); player.play()
+            }
             currentChannel = ch
             afrAppliedFor = null
             startWatchdog()
@@ -1579,31 +2229,83 @@ class PlayerActivity : Activity() {
     }
 
     private fun openLeftMenu() {
+        val fromBrowser = panel == Panel.BROWSER && browserOverlay.visibility == View.VISIBLE
+        val railSelectedPos = catList.selectedItemPosition
+        val railSelectedTop = if (fromBrowser)
+            catList.getChildAt(railSelectedPos - catList.firstVisiblePosition)?.top else null
         panel = Panel.LEFT
         phoneBar.visibility = View.GONE
         val wasCollapsed = menuCollapsed && leftMenu.visibility == View.VISIBLE
         menuPlaylistIdx = if (curPlaylistIdx >= 0) curPlaylistIdx else lastRealPlaylistIdx
         if (menuPlaylistIdx > playlists.size - 1) menuPlaylistIdx = 0
         if (menuPlaylistIdx < 0) menuPlaylistIdx = 0
+
+        if (fromBrowser) {
+            browserOverlay.animate().cancel()
+            browserList.animate().cancel()
+            previewBackdrop.animate().cancel()
+            previewCard.animate().cancel()
+            browserOverlay.alpha = 1f
+            browserList.animate().translationX(-browserSlideDistance()).alpha(0f)
+                .setDuration(380).setInterpolator(menuFoldEase).withLayer().start()
+            previewCard.animate().translationY(dp(30).toFloat()).alpha(0f)
+                .setDuration(340).setInterpolator(easeInReverse).start()
+            previewBackdrop.animate().alpha(0f)
+                .setDuration(340).setInterpolator(easeInReverse).start()
+            morphMenu(toRail = false, prepareTarget = {
+                refreshLeftMenu()
+                expandMenu(animate = false)
+                leftFixedTop.visibility = View.VISIBLE
+                focusCurrentMenuCategory(railSelectedTop)
+            }, onComplete = {
+                browserOverlay.visibility = View.GONE
+                browserList.translationX = 0f
+                browserList.alpha = 1f
+                previewCard.translationY = 0f
+                previewCard.alpha = 1f
+                previewBackdrop.alpha = 1f
+                browserOpenedFromLeft = false
+            })
+            updateStageDim()
+            return
+        }
+
         refreshLeftMenu()
         leftMenu.visibility = View.VISIBLE
         expandMenu(animate = wasCollapsed)
         if (!wasCollapsed) animPanelInLeft(leftMenu)
         leftFixedTop.visibility = View.VISIBLE
+        focusCurrentMenuCategory()
+        updateStageDim()
+    }
+
+    private fun focusCurrentMenuCategory(selectedTop: Int? = null) {
+        if (playlists.isEmpty()) {
+            catList.requestFocus()
+            catList.setSelection(0)
+            return
+        }
         when {
             curPlaylistIdx == -1 -> favRow.requestFocus()
             curCategory == null -> {
                 catList.requestFocus()
                 val sel = catOnlyList.indexOfFirst { it.type == "ALL" }
-                if (sel >= 0) catList.setSelection(sel)
+                if (sel >= 0) {
+                    menuReturnCategoryIndex = sel
+                    if (selectedTop != null) catList.setSelectionFromTop(sel, selectedTop)
+                    else catList.setSelection(sel)
+                }
             }
             else -> {
                 catList.requestFocus()
                 val sel = catOnlyList.indexOfFirst { it.type == "GROUP" && it.group == curCategory }
-                if (sel >= 0) catList.setSelection(sel)
+                if (sel >= 0) {
+                    menuReturnCategoryIndex = sel
+                    if (selectedTop != null) catList.setSelectionFromTop(sel, selectedTop)
+                    else catList.setSelection(sel)
+                }
             }
         }
-        updateStageDim()
     }
 
     private fun cycleMenuPlaylist(dir: Int) {
@@ -1676,7 +2378,7 @@ class PlayerActivity : Activity() {
                 KeyEvent.KEYCODE_DPAD_LEFT -> { cycleMenuPlaylist(-1); true }
                 KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_CENTER,
                 KeyEvent.KEYCODE_ENTER -> { cycleMenuPlaylist(1); true }
-                KeyEvent.KEYCODE_BACK -> { closePanels(); true }
+                KeyEvent.KEYCODE_BACK -> { closeLeftMenuAnimated(); true }
                 else -> false
             }
         }
@@ -1686,14 +2388,14 @@ class PlayerActivity : Activity() {
     private fun prepareFixedRow(row: View, action: () -> Unit) {
         row.isFocusable = true
         row.isFocusableInTouchMode = false
-        row.setBackgroundResource(R.drawable.list_focus)
+        row.setBackgroundResource(R.drawable.fixed_row_focus)
         row.setOnClickListener { action() }
         row.setOnKeyListener { _, keyCode, event ->
             if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
             when (keyCode) {
                 KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_CENTER,
                 KeyEvent.KEYCODE_ENTER -> { action(); true }
-                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_BACK -> { closePanels(); true }
+                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_BACK -> { closeLeftMenuAnimated(); true }
                 else -> false
             }
         }
@@ -1713,7 +2415,8 @@ class PlayerActivity : Activity() {
 
     private fun buildCatOnlyList(plIdx: Int): List<CatItem> {
         val items = ArrayList<CatItem>()
-        val pl = playlists.getOrNull(plIdx) ?: return items
+        val pl = playlists.getOrNull(plIdx)
+            ?: return listOf(CatItem("Добавить плейлист", 0, "ADD_PLAYLIST"))
         items.add(CatItem("Все каналы", pl.channels.size, "ALL"))
         val counts = LinkedHashMap<String, Int>()
         for (c in pl.channels) counts[c.group] = (counts[c.group] ?: 0) + 1
@@ -1724,6 +2427,7 @@ class PlayerActivity : Activity() {
     private fun activateCatOnly(pos: Int) {
         val item = catOnlyList.getOrNull(pos) ?: return
         when (item.type) {
+            "ADD_PLAYLIST" -> openPlaylistSettings()
             "ALL" -> selectCategory(null)
             "GROUP" -> selectCategory(item.group)
         }
@@ -1732,6 +2436,7 @@ class PlayerActivity : Activity() {
     private fun refreshLeftMenu() {
         catItemsList = buildCatItems(menuPlaylistIdx)
         updateFixedTop()
+        plSelFixed.visibility = if (playlists.isEmpty()) View.GONE else View.VISIBLE
         catOnlyList = buildCatOnlyList(menuPlaylistIdx)
         catList.adapter = CategoryAdapter(this, catOnlyList)
         catList.setOnItemClickListener { _, _, pos, _ -> activateCatOnly(pos) }
@@ -1792,7 +2497,7 @@ class PlayerActivity : Activity() {
             val hint = if (EpgManager.loaded) listOf("Для этого канала нет программы передач")
             else listOf(EpgManager.status(), "Добавьте источник EPG с телефона", "или в Настройках на ТВ")
             epgList.adapter = ArrayAdapter(this, R.layout.item_row, hint)
-            epgList.setOnItemClickListener { _, _, _, _ -> closePanels() }
+            epgList.setOnItemClickListener { _, _, _, _ -> closeEpgPanel() }
         } else {
             val labels = progs.map { p ->
                 val t = timeFmt.format(Date(p.start))
@@ -1809,23 +2514,43 @@ class PlayerActivity : Activity() {
             epgList.setOnItemClickListener { _, _, pos, _ ->
                 val p = progs[pos]
                 when {
-                    now in p.start until p.stop -> closePanels()
-                    p.start > now -> closePanels()
+                    now in p.start until p.stop -> closeEpgPanel()
+                    p.start > now -> closeEpgPanel()
                     else -> {
                         val inArc = canArc && p.start >= arcFrom
-                        if (inArc) { closePanels(); playCatchup(ch, CatchupHelper.buildUrl(ch, p.start / 1000, p.stop / 1000), p.title) }
+                        if (inArc) closeEpgPanel { playCatchup(ch, CatchupHelper.buildUrl(ch, p.start / 1000, p.stop / 1000), p.title) }
                         else toast(if (canArc) "Передача вне доступного архива (хранится $arcDays дн.)" else "Архив для этого канала недоступен")
                     }
                 }
             }
         }
         rightPanel.visibility = View.VISIBLE
-        animPanelInRight(rightPanel)
+        rightPanel.animate().cancel()
+        epgClosing = false
+        rightPanel.translationX = dp(34).toFloat()
+        rightPanel.alpha = 0f
+        rightPanel.animate().translationX(0f).alpha(1f)
+            .setDuration(420).setInterpolator(epgPanelEase).start()
         epgList.requestFocus()
         val sel = if (targetStart > 0) progs.indexOfFirst { it.start == targetStart }
                   else progs.indexOfFirst { now in it.start until it.stop }
-        if (sel >= 0) epgList.setSelection(maxOf(0, sel - 2))
+        if (sel >= 0) epgList.setSelectionFromTop(sel, 0)
         updateStageDim()
+    }
+
+    private fun closeEpgPanel(onClosed: () -> Unit = {}) {
+        if (epgClosing || rightPanel.visibility != View.VISIBLE) return
+        epgClosing = true
+        rightPanel.animate().cancel()
+        stageDim.animate().cancel()
+        stageDim.animate().alpha(0f).setDuration(420).setInterpolator(epgPanelEase).start()
+        rightPanel.animate().translationX(dp(34).toFloat()).alpha(0f)
+            .setDuration(420).setInterpolator(epgPanelEase)
+            .withEndAction {
+                epgClosing = false
+                if (panel == Panel.RIGHT) closePanels()
+                onClosed()
+            }.start()
     }
 
     private fun setupSearch() {
@@ -1851,7 +2576,26 @@ class PlayerActivity : Activity() {
         imm?.hideSoftInputFromWindow(searchInput.windowToken, 0)
     }
 
+    private fun registerSearchBackCallback() {
+        if (android.os.Build.VERSION.SDK_INT < 33 || searchBackCallback != null) return
+        val callback = android.window.OnBackInvokedCallback { returnSearchToLeftMenu() }
+        onBackInvokedDispatcher.registerOnBackInvokedCallback(
+            android.window.OnBackInvokedDispatcher.PRIORITY_OVERLAY, callback
+        )
+        searchBackCallback = callback
+    }
+
+    private fun unregisterSearchBackCallback() {
+        val callback = searchBackCallback ?: return
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            onBackInvokedDispatcher.unregisterOnBackInvokedCallback(callback)
+        }
+        searchBackCallback = null
+    }
+
     private fun openSearch() {
+        searchReturning = false
+        searchInput.onBackBeforeIme = { returnSearchToLeftMenu() }
         browserOverlay.visibility = View.GONE
         rightPanel.visibility = View.GONE
         if (::settingsPanel.isInitialized) settingsPanel.visibility = View.GONE
@@ -1863,6 +2607,7 @@ class PlayerActivity : Activity() {
         searchResults.adapter = null
         searchStatus.text = "Введите название. Поиск идёт по идущим сейчас, будущим и доступным в архиве передачам."
         searchOverlay.visibility = View.VISIBLE
+        registerSearchBackCallback()
         animFadeIn(searchOverlay)
         animRailIn(searchContent)
         showRail("SEARCH")
@@ -1872,7 +2617,44 @@ class PlayerActivity : Activity() {
         updateStageDim()
     }
 
+    private fun returnSearchToLeftMenu() {
+        if (searchReturning) return
+        searchReturning = true
+        searchInput.onBackBeforeIme = null
+        unregisterSearchBackCallback()
+        handler.removeCallbacks(searchRunnable)
+        searchSeq++
+        hideSearchKeyboard()
+        searchInput.clearFocus()
+        searchContent.animate().cancel()
+        searchOverlay.animate().cancel()
+        searchContent.animate().translationX(-dp(160).toFloat()).alpha(0f)
+            .setDuration(300).setInterpolator(easeRailOut).withLayer().start()
+        searchOverlay.animate().alpha(0f)
+            .setDuration(380).setInterpolator(easeRailOut).start()
+        panel = Panel.LEFT
+        morphMenu(toRail = false, prepareTarget = {
+            refreshLeftMenu()
+            expandMenu(animate = false)
+            leftFixedTop.visibility = View.VISIBLE
+            searchRow.requestFocusFromTouch()
+        }, onComplete = {
+            searchContent.animate().cancel()
+            searchOverlay.animate().cancel()
+            searchOverlay.visibility = View.GONE
+            searchOverlay.alpha = 1f
+            searchContent.translationX = 0f
+            searchContent.alpha = 1f
+            searchRow.requestFocus()
+            searchReturning = false
+            updateStageDim()
+        })
+        updateStageDim()
+    }
+
     private fun closeSearch() {
+        searchInput.onBackBeforeIme = null
+        unregisterSearchBackCallback()
         handler.removeCallbacks(searchRunnable)
         val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
         imm?.hideSoftInputFromWindow(searchInput.windowToken, 0)
@@ -2022,8 +2804,8 @@ class PlayerActivity : Activity() {
     }
 
     private fun showQualityDialog() {
-        val opts = arrayOf("Авто (рекомендуется)", "Стабильность (до 720p, больше буфер)", "Максимум")
-        val vals = arrayOf("auto", "stable", "max")
+        val opts = arrayOf("Авто (рекомендуется)", "До 720p (если у потока несколько качеств)")
+        val vals = arrayOf("auto", "stable")
         AlertDialog.Builder(this).setTitle("Качество трансляции")
             .setItems(opts) { _, which ->
                 Store.quality = vals[which]
@@ -2082,9 +2864,7 @@ class PlayerActivity : Activity() {
             "🎚 Потолок качества: ${Quality.qualityLabel()}",
             "⏱ Размер буфера: ${Quality.bufferLabel()}",
             "🛰 Задержка от эфира: ${Quality.liveOffsetLabel()}",
-            "🔌 При обрыве связи: ${Quality.retryLabel()}",
-            "🧩 Тип декодера: ${Quality.decoderLabel()}",
-            "🖥 Автофреймрейт: ${if (Store.afr) "вкл" else "выкл"}"
+            "🧩 Тип декодера: ${Quality.decoderLabel()}"
         )
         AlertDialog.Builder(this).setTitle("Качество трансляции")
             .setItems(items) { _, which ->
@@ -2092,47 +2872,23 @@ class PlayerActivity : Activity() {
                     0 -> showQualityDialog()
                     1 -> showBufferDialog()
                     2 -> showLiveOffsetDialog()
-                    3 -> showRetryDialog()
-                    4 -> showDecoderDialog()
-                    5 -> {
-                        Store.afr = !Store.afr
-                        if (!Store.afr) Quality.resetFrameRate(this)
-                        toast("Автофреймрейт: ${if (Store.afr) "вкл" else "выкл"}")
-                        if (Store.afr) applyAutoFrameRate()
-                    }
+                    3 -> showDecoderDialog()
                 }
             }.show()
     }
 
     private fun showLiveOffsetDialog() {
         val options = arrayOf(
-            "Как в потоке (минимальная)",
-            "10 сек",
-            "20 сек — слабый интернет",
-            "30 сек — очень слабый интернет",
-            "60 сек"
+            "Как в потоке",
+            "15 сек (если поддерживается потоком)",
+            "30 сек (если поддерживается потоком)"
         )
-        val values = intArrayOf(0, 10, 20, 30, 60)
+        val values = intArrayOf(0, 15, 30)
         AlertDialog.Builder(this).setTitle("Задержка от эфира")
             .setItems(options) { _, which ->
                 Store.liveOffsetSec = values[which]
                 rebuildPlayerKeepingChannel()
                 toast("Задержка от эфира: ${Quality.liveOffsetLabel()}")
-            }.show()
-    }
-
-    private fun showRetryDialog() {
-        val options = arrayOf(
-            "Быстро сдаваться (сразу к другому источнику)",
-            "Обычно",
-            "Упорно — для слабого интернета"
-        )
-        val values = arrayOf("fast", "normal", "persistent")
-        AlertDialog.Builder(this).setTitle("При обрыве связи")
-            .setItems(options) { _, which ->
-                Store.retryMode = values[which]
-                rebuildPlayerKeepingChannel()
-                toast("При обрыве: ${Quality.retryLabel()}")
             }.show()
     }
 
@@ -2240,8 +2996,8 @@ class PlayerActivity : Activity() {
     }
 
     private fun showBufferDialog() {
-        val options = arrayOf("5 сек", "10 сек", "15 сек", "30 сек", "60 сек")
-        val values = intArrayOf(5, 10, 15, 30, 60)
+        val options = arrayOf("30 сек (сбалансировано)", "60 сек (нестабильная сеть)")
+        val values = intArrayOf(30, 60)
         AlertDialog.Builder(this).setTitle("Размер буфера")
             .setItems(options) { _, which ->
                 Store.bufferSec = values[which]
@@ -2264,14 +3020,25 @@ class PlayerActivity : Activity() {
     }
 
     private fun rollbackVersion() {
-        UpdateManager.checkAsync(this, Store.updateRepo) { info, _ ->
-            if (info == null || info.prevUrl.isEmpty()) { toast("Предыдущая версия не найдена"); return@checkAsync }
-            AlertDialog.Builder(this)
-                .setTitle("Вернуться на предыдущую версию")
-                .setMessage("Будет установлена версия ${info.prevName}.\nНастройки и данные сохранятся.\n\nНа некоторых ТВ может потребоваться подтвердить установку вручную.")
-                .setPositiveButton("Вернуться") { _, _ -> startDownload(info.prevUrl, info.prevCode) }
-                .setNegativeButton("Отмена", null).show()
-        }
+        val current = UpdateManager.currentCode(this)
+        Thread {
+            val versions = UpdateManager.fetchRollbackVersions(Store.updateRepo, current)
+            runOnUiThread {
+                if (versions.isEmpty()) { toast("Доступные предыдущие версии не найдены"); return@runOnUiThread }
+                AlertDialog.Builder(this).setTitle("Выбрать версию")
+                    .setItems(versions.map { "BQDiptv ${it.versionName}" }.toTypedArray()) { _, which ->
+                        confirmRollback(versions[which])
+                    }.setNegativeButton("Отмена", null).show()
+            }
+        }.start()
+    }
+
+    private fun confirmRollback(release: UpdateManager.Release) {
+        AlertDialog.Builder(this)
+            .setTitle("Установить BQDiptv ${release.versionName}?")
+            .setMessage("Текущая версия: ${UpdateManager.currentName(this)} · сборка ${UpdateManager.currentCode(this)}.\nВыбрана версия ${release.versionName}.\n\nЕсли APK выпущен без поддержки отката, Android может отклонить установку.")
+            .setPositiveButton("Продолжить") { _, _ -> startDownload(release.apkUrl, release.versionCode) }
+            .setNegativeButton("Отмена", null).show()
     }
 
     private fun startDownload(url: String, versionCode: Int) {
@@ -2304,7 +3071,11 @@ class PlayerActivity : Activity() {
         }
     }
 
-    private fun showScreensaver() { screensaver.visibility = View.VISIBLE; moveSsClock() }
+    private fun showScreensaver() {
+        screensaver.visibility = View.VISIBLE
+        updateWidgetsVisibility()
+        moveSsClock()
+    }
 
     private fun moveSsClock() {
         ssClock.text = timeFmt.format(Date())
@@ -2317,12 +3088,17 @@ class PlayerActivity : Activity() {
 
     private fun hideScreensaver() {
         screensaver.visibility = View.GONE
+        updateWidgetsVisibility()
         pausedSince = if (!playerReleased && player.isPlaying) 0L else System.currentTimeMillis()
     }
 
     private val easeOut = PathInterpolator(0.2f, 0.7f, 0.3f, 1f)
+    private val menuFoldEase = PathInterpolator(0.45f, 0f, 0.2f, 1f)
+    private val easeInReverse = PathInterpolator(0.7f, 0f, 0.8f, 0.3f)
     private val easeRailIn = PathInterpolator(0.2f, 0.72f, 0.28f, 1f)
     private val easeRailOut = PathInterpolator(0.4f, 0f, 0.7f, 1f)
+    private val easeRailReturn = PathInterpolator(0.3f, 0f, 0.6f, 1f)
+    private val epgPanelEase = PathInterpolator(0.42f, 0f, 0.58f, 1f)
 
     private fun animPanelInLeft(v: View) {
         v.animate().cancel()
@@ -2340,6 +3116,12 @@ class PlayerActivity : Activity() {
         v.animate().cancel()
         v.translationX = -dp(160).toFloat(); v.alpha = 0.15f
         v.animate().translationX(0f).alpha(1f).setDuration(360).setInterpolator(easeRailIn).start()
+    }
+
+    private fun animBrowserRailIn(v: View) {
+        v.animate().cancel()
+        v.translationX = -dp(160).toFloat(); v.alpha = 0f
+        v.animate().translationX(0f).alpha(1f).setDuration(300).setInterpolator(easeRailReturn).start()
     }
 
     private fun animRailOut(v: View, then: () -> Unit) {
@@ -2384,6 +3166,7 @@ class PlayerActivity : Activity() {
         SetItem("qr_code_2", "Настройка через смартфон", "qr"),
         SetItem("playlist_add", "Плейлисты и ТВ-программа", "sources"),
         SetItem("high_quality", "Качество трансляции", "quality"),
+        SetItem("timer", "Виджеты", "widgets"),
         SetItem("info", "О программе", "about")
     )
 
@@ -2392,19 +3175,15 @@ class PlayerActivity : Activity() {
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
     private fun openSettingsPanel() {
+        val fromLeftMenu = panel == Panel.LEFT && leftMenu.visibility == View.VISIBLE && !menuCollapsed
         panel = Panel.SETTINGS
+        settingsReturning = false
         browserOverlay.visibility = View.GONE
         rightPanel.visibility = View.GONE
         phoneBar.visibility = View.GONE
         setDetailActive = false
         setList.isFocusable = true
         setListVersion.text = "BQDiptv · ${UpdateManager.currentName(this)}"
-        settingsPanel.visibility = View.VISIBLE
-        animFadeIn(settingsPanel)
-        showRail("SETTINGS")
-        animRailIn(setListPanel)
-        animPanelInRight(setDetailScroll)
-
         val adapter = SettingsAdapter(this, setItems) { setValueFor(it) }
         setList.adapter = adapter
         setList.setOnItemClickListener { _, _, pos, _ -> enterSetDetail(pos) }
@@ -2415,9 +3194,27 @@ class PlayerActivity : Activity() {
             }
             override fun onNothingSelected(p: android.widget.AdapterView<*>?) {}
         })
-        setList.requestFocus()
         setList.setSelection(setSelected.coerceIn(0, setItems.size - 1))
         renderSetDetail(setSelected, active = false)
+
+        settingsPanel.animate().cancel()
+        settingsPanel.visibility = View.VISIBLE
+        if (fromLeftMenu) settingsPanel.alpha = 1f else animFadeIn(settingsPanel)
+        setListPanel.animate().cancel()
+        setListPanel.translationX = -settingsListSlideDistance()
+        setListPanel.alpha = 0f
+        setDetailScroll.animate().cancel()
+        setDetailScroll.translationX = -settingsDetailSlideDistance()
+        setDetailScroll.alpha = 0f
+
+        setListPanel.animate().translationX(0f).alpha(1f)
+            .setDuration(380).setInterpolator(menuFoldEase).withLayer().start()
+        setDetailScroll.animate().translationX(0f).alpha(1f)
+            .setStartDelay(40).setDuration(420).setInterpolator(menuFoldEase).withLayer().start()
+        if (fromLeftMenu) transitionMenuToRail("SETTINGS") else showRail("SETTINGS")
+
+        setList.requestFocus()
+        setList.setSelection(setSelected.coerceIn(0, setItems.size - 1))
         updateStageDim()
     }
 
@@ -2431,14 +3228,37 @@ class PlayerActivity : Activity() {
     }
 
     private fun returnToLeftMenu() {
+        if (panel != Panel.SETTINGS || settingsReturning) return
+        settingsReturning = true
         setDetailActive = false
         if (::setList.isInitialized) setList.isFocusable = true
-        settingsPanel.visibility = View.GONE
-        panel = Panel.LEFT
-        expandMenu(animate = true)
-        if (::leftFixedTop.isInitialized) leftFixedTop.visibility = View.VISIBLE
-        refreshLeftMenu()
-        settingsRow.requestFocus()
+        settingsPanel.animate().cancel()
+        settingsPanel.alpha = 1f
+        setListPanel.animate().cancel()
+        setDetailScroll.animate().cancel()
+        setDetailScroll.animate().translationX(-settingsDetailSlideDistance()).alpha(0f)
+            .setDuration(260).setInterpolator(easeOut).withLayer().start()
+        handler.postDelayed({
+            if (!settingsReturning || panel != Panel.SETTINGS) return@postDelayed
+            panel = Panel.LEFT
+            setListPanel.animate().translationX(-settingsListSlideDistance()).alpha(0f)
+                .setDuration(380).setInterpolator(menuFoldEase).withLayer().start()
+            morphMenu(toRail = false, prepareTarget = {
+                refreshLeftMenu()
+                expandMenu(animate = false)
+                leftFixedTop.visibility = View.VISIBLE
+                settingsRow.requestFocus()
+            }, onComplete = {
+                setListPanel.animate().cancel()
+                setDetailScroll.animate().cancel()
+                settingsPanel.visibility = View.GONE
+                setListPanel.translationX = 0f
+                setListPanel.alpha = 1f
+                setDetailScroll.translationX = 0f
+                setDetailScroll.alpha = 1f
+                settingsReturning = false
+            })
+        }, 100)
         updateStageDim()
     }
 
@@ -2451,6 +3271,20 @@ class PlayerActivity : Activity() {
         setRow = 0; setCol = 0
         setDetailActive = true
         renderSetDetail(pos, active = true)
+        if (setItems.getOrNull(pos)?.kind == "about" && !aboutVersionsLoaded && !aboutVersionsLoading) {
+            aboutVersionsLoading = true
+            rerenderDetail()
+            val current = UpdateManager.currentCode(this)
+            Thread {
+                val versions = UpdateManager.fetchRollbackVersions(Store.updateRepo, current)
+                runOnUiThread {
+                    aboutVersions = versions
+                    aboutVersionsLoading = false
+                    aboutVersionsLoaded = true
+                    if (setItems.getOrNull(setSelected)?.kind == "about") rerenderDetail()
+                }
+            }.start()
+        }
         if (sdCellViews.isEmpty()) {
             setDetailActive = false
             renderSetDetail(pos, active = false)
@@ -2491,23 +3325,30 @@ class PlayerActivity : Activity() {
         val secIcon: String? = null,
         val secTitle: String = "",
         val secDesc: String = "",
+        val secCount: Int = -1,
         val divider: Boolean = false,
         val about: Boolean = false,
         val qr: Boolean = false,
+        val quality: Boolean = false,
         val label: String = "",
         val cells: List<SdCell>? = null
     )
 
     private var setRow = 0
     private var setCol = 0
+    private var settingsScrollGeneration = 0
+    private var aboutVersions: List<UpdateManager.Release> = emptyList()
+    private var aboutVersionsLoading = false
+    private var aboutVersionsLoaded = false
     private val sdCellViews = ArrayList<List<View>>()
     private val sdCellModels = ArrayList<List<SdCell>>()
 
     private fun sectionDesc(kind: String): String = when (kind) {
         "qr" -> "Отсканируйте QR-код телефоном или откройте адрес в браузере. Телефон и ТВ должны быть в одной Wi-Fi сети. На странице настройки добавьте плейлист M3U — эфир запустится сам."
-        "sources" -> "Добавляйте, редактируйте и удаляйте плейлисты (M3U / M3U8) и источники телепрограммы (EPG, XMLTV). Здесь же можно обновить все подключённые списки и источники — телепрограмма подтянется к каналам автоматически по их именам."
-        "quality" -> "Параметры воспроизведения. При слабом интернете сильнее всего помогают «задержка от эфира» и упорное переподключение при обрыве."
-        "about" -> "Версия приложения, проверка обновлений и откат на предыдущую версию."
+        "sources" -> "Управляйте списками каналов и источниками телепрограммы."
+        "quality" -> "Настройте поток под сеть и устройство. Эффект зависит от возможностей канала."
+        "widgets" -> "Часы и погода у верхнего края экрана. Положение и параметры виджетов можно изменить. Данные погоды: Open-Meteo."
+        "about" -> "Версия приложения, обновления и доступные предыдущие сборки."
         else -> ""
     }
 
@@ -2523,100 +3364,96 @@ class PlayerActivity : Activity() {
                 )))
             }
             "sources" -> {
+                val playlists = Store.getPlaylistCfgs()
+                val epgSources = Store.getEpgSources()
                 rows.add(SdRow(secIcon = "playlist_play", secTitle = "Плейлисты",
-                    secDesc = "Вставьте прямую ссылку на плейлист в формате M3U / M3U8. После добавления он появится в списке плейлистов."))
+                    secDesc = "Списки каналов M3U и M3U8", secCount = playlists.size))
                 rows.add(SdRow(cells = listOf(
-                    SdCell("field", "", "", label2 = "Поле ввода для ссылки") { showManualUrlDialog(fromPhoneSetup = false) },
-                    SdCell("btn", "Добавить", "add", primary = true) { showManualUrlDialog(fromPhoneSetup = false) }
+                    SdCell("btn", "Добавить плейлист", "add", primary = true, wide = true) {
+                        showManualUrlDialog(fromPhoneSetup = false)
+                    }
                 )))
-                for (cfg in Store.getPlaylistCfgs()) {
+                for (cfg in playlists) {
                     rows.add(SdRow(cells = listOf(
-                        SdCell("name", cfg.name) { renamePlaylistDialog(cfg.name, cfg.url) },
-                        SdCell("ic", "", "edit") { renamePlaylistDialog(cfg.name, cfg.url) },
-                        SdCell("ic", "", "sync", refr = true) {
+                        SdCell("name", cfg.name, label2 = cfg.url) { renamePlaylistDialog(cfg.name, cfg.url) },
+                        SdCell("ic", "", "edit", label2 = cfg.name) { renamePlaylistDialog(cfg.name, cfg.url) },
+                        SdCell("ic", "", "sync", refr = true, label2 = cfg.name) {
                             toast("Обновляю плейлист…"); forceRefreshPlaylists()
                         },
-                        SdCell("ic", "", "delete", del = true) { deletePlaylistDialog(cfg.name, cfg.url) }
+                        SdCell("ic", "", "delete", del = true, label2 = cfg.name) { deletePlaylistDialog(cfg.name, cfg.url) }
                     )))
                 }
-                rows.add(SdRow(cells = listOf(
-                    SdCell("btn", "Обновить все плейлисты", "sync", wide = true, lime = true) {
+                if (playlists.isNotEmpty()) rows.add(SdRow(cells = listOf(
+                    SdCell("btn", "Обновить все плейлисты", "sync", wide = true) {
                         toast("Обновляю плейлисты…"); forceRefreshPlaylists()
                     }
                 )))
                 rows.add(SdRow(divider = true))
-                rows.add(SdRow(secIcon = "event_note", secTitle = "Источники ТВ-программы (EPG)",
-                    secDesc = "Ссылка на телепрограмму в формате XMLTV. Программа подтянется к каналам автоматически по их именам."))
+                rows.add(SdRow(secIcon = "event_note", secTitle = "ТВ-программа",
+                    secDesc = "Источники EPG в формате XMLTV", secCount = epgSources.size))
                 rows.add(SdRow(cells = listOf(
-                    SdCell("field", "", "", label2 = "Поле ввода для ссылки") { showManualEpgDialog(fromPhoneSetup = false) },
-                    SdCell("btn", "Добавить", "add", primary = true) { showManualEpgDialog(fromPhoneSetup = false) }
+                    SdCell("btn", "Добавить источник EPG", "add", primary = true, wide = true) {
+                        showManualEpgDialog(fromPhoneSetup = false)
+                    }
                 )))
-                for (src in Store.getEpgSources()) {
+                for (src in epgSources) {
                     rows.add(SdRow(cells = listOf(
-                        SdCell("name", src.name) { renameEpgDialog(src.name, src.url) },
-                        SdCell("ic", "", "edit") { renameEpgDialog(src.name, src.url) },
-                        SdCell("ic", "", "sync", refr = true) { toast("Обновляю телепрограмму…"); forceRefreshEpg() },
-                        SdCell("ic", "", "delete", del = true) { deleteEpgDialog(src.name, src.url) }
+                        SdCell("name", src.name, label2 = src.url) { renameEpgDialog(src.name, src.url) },
+                        SdCell("ic", "", "edit", label2 = src.name) { renameEpgDialog(src.name, src.url) },
+                        SdCell("ic", "", "sync", refr = true, label2 = src.name) { toast("Обновляю телепрограмму…"); forceRefreshEpg() },
+                        SdCell("ic", "", "delete", del = true, label2 = src.name) { deleteEpgDialog(src.name, src.url) }
                     )))
                 }
-                rows.add(SdRow(cells = listOf(
-                    SdCell("btn", "Обновить все источники", "sync", wide = true, lime = true) {
+                if (epgSources.isNotEmpty()) rows.add(SdRow(cells = listOf(
+                    SdCell("btn", "Обновить всю ТВ-программу", "sync", wide = true) {
                         toast("Обновляю телепрограмму…"); forceRefreshEpg()
                     }
                 )))
             }
             "quality" -> {
-                val qVals = listOf("auto", "stable", "max")
-                rows.add(SdRow(label = "Потолок качества", cells =
-                    listOf("Авто", "Стабильность", "Максимум").mapIndexed { i, o ->
-                        SdCell("chip", o, sel = Store.quality == qVals[i]) {
+                val qVals = listOf("auto", "stable")
+                rows.add(SdRow(quality = true, label = "Качество видео",
+                    secDesc = "Ограничение до 720p действует, если поток предлагает несколько качеств.", cells =
+                    listOf("Авто", "До 720p").mapIndexed { i, o ->
+                        SdCell("quality_choice", o, sel = Store.quality == qVals[i]) {
                             Store.quality = qVals[i]; applyQuality(); refreshSetList()
                             toast("Качество: ${Quality.qualityLabel()}"); rerenderDetail()
                         }
                     }))
-                val bufVals = listOf(5, 10, 15, 30, 60)
-                rows.add(SdRow(label = "Размер буфера", cells = bufVals.map { v ->
-                    SdCell("chip", "$v сек", sel = Store.bufferSec == v) {
+                val bufVals = listOf(30, 60)
+                rows.add(SdRow(quality = true, label = "Запас буфера",
+                    secDesc = "30 сек — сбалансировано; 60 сек — для нестабильной сети, если поток позволяет.",
+                    cells = bufVals.map { v ->
+                    SdCell("quality_choice", "$v сек", sel = Store.bufferSec == v) {
                         Store.bufferSec = v; rebuildPlayerKeepingChannel(); refreshSetList()
                         toast("Буфер: $v сек"); rerenderDetail()
                     }
                 }))
-                val offVals = listOf(0, 10, 20, 30, 60)
-                val offLabels = listOf("Как в потоке", "10 сек", "20 сек", "30 сек", "60 сек")
-                rows.add(SdRow(label = "Задержка от эфира", cells = offVals.mapIndexed { i, v ->
-                    SdCell("chip", offLabels[i], sel = Store.liveOffsetSec == v) {
+                val offVals = listOf(0, 15, 30)
+                val offLabels = listOf("Поток", "15 сек", "30 сек")
+                rows.add(SdRow(quality = true, label = "Задержка от эфира",
+                    secDesc = "Для live HLS/DASH. «Поток» оставляет задержку источника; другие значения помогают при замираниях, если эфир поддерживает отставание.",
+                    cells = offVals.mapIndexed { i, v ->
+                    SdCell("quality_choice", offLabels[i], sel = Store.liveOffsetSec == v) {
                         Store.liveOffsetSec = v; rebuildPlayerKeepingChannel()
                         toast("Задержка: ${Quality.liveOffsetLabel()}"); rerenderDetail()
                     }
                 }))
-                val retryVals = listOf("fast", "normal", "persistent")
-                rows.add(SdRow(label = "При обрыве связи", cells =
-                    listOf("Быстро сдаваться", "Обычно", "Упорно").mapIndexed { i, o ->
-                        SdCell("chip", o, sel = Store.retryMode == retryVals[i]) {
-                            Store.retryMode = retryVals[i]; rebuildPlayerKeepingChannel()
-                            toast("При обрыве: ${Quality.retryLabel()}"); rerenderDetail()
-                        }
-                    }))
                 val decVals = listOf("hw", "sw")
-                rows.add(SdRow(label = "Тип декодера", cells =
-                    listOf("Аппаратный (HW)", "Программный (SW)").mapIndexed { i, o ->
-                        SdCell("chip", o, sel = Store.decoder == decVals[i]) {
+                rows.add(SdRow(quality = true, label = "Декодирование",
+                    secDesc = "Аппаратное экономит ресурсы. Программное попробуйте, если видео искажается.", cells =
+                    listOf("Аппаратное", "Программное").mapIndexed { i, o ->
+                        SdCell("quality_choice", o, sel = Store.decoder == decVals[i]) {
                             Store.decoder = decVals[i]; rebuildPlayerKeepingChannel()
                             toast("Декодер: ${Quality.decoderLabel()}"); rerenderDetail()
                         }
                     }))
-                rows.add(SdRow(label = "Автофреймрейт (AFR)", cells = listOf(
-                    SdCell("toggle", "", on = Store.afr) {
-                        Store.afr = !Store.afr
-                        if (!Store.afr) Quality.resetFrameRate(this) else applyAutoFrameRate()
-                        toast("Автофреймрейт: ${if (Store.afr) "вкл" else "выкл"}"); rerenderDetail()
-                    }
-                )))
                 rows.add(SdRow(divider = true))
                 rows.add(SdRow(cells = listOf(
-                    SdCell("btn", "Настройки по умолчанию", "settings_backup_restore",
+                    SdCell("btn", "Восстановить рекомендуемые настройки", "settings_backup_restore",
                         wide = true, lime = true) {
                         Store.applyRecommendedQuality()
+                        Quality.resetFrameRate(this)
                         rebuildPlayerKeepingChannel()
                         refreshSetList()
                         toast("Применены рекомендуемые настройки")
@@ -2624,15 +3461,82 @@ class PlayerActivity : Activity() {
                     }
                 )))
             }
+            "widgets" -> {
+                val sizes = listOf("S", "M", "L")
+                rows.add(SdRow(quality = true, label = "Положение виджетов", cells =
+                    listOf("left" to "Слева", "right" to "Справа").map { (side, label) ->
+                        SdCell("quality_choice", label, sel = Store.widgetSide == side) {
+                            Store.widgetSide = side; refreshWidgetUi(); rerenderDetail()
+                        }
+                    }))
+                rows.add(SdRow(secIcon = "timer", secTitle = "Часы",
+                    secDesc = "Время в формате часы:минуты"))
+                rows.add(SdRow(quality = true, label = "Показывать часы", cells =
+                    listOf(true to "Включено", false to "Выключено").map { (value, label) ->
+                        SdCell("quality_choice", label, sel = Store.clockWidgetEnabled == value) {
+                            Store.clockWidgetEnabled = value
+                            refreshWidgetUi(); refreshWidgetData(); rerenderDetail()
+                        }
+                    }))
+                rows.add(SdRow(quality = true, label = "Размер часов", cells = sizes.map { size ->
+                    SdCell("quality_choice", size, sel = Store.clockWidgetSize == size) {
+                        Store.clockWidgetSize = size; refreshWidgetUi(); rerenderDetail()
+                    }
+                }))
+                val zoneLabel = Store.clockWidgetTimeZone.ifBlank {
+                    networkWidgetPlace?.timeZone?.let { "Авто · $it" } ?: "Авто · часовой пояс ТВ"
+                }
+                rows.add(SdRow(cells = listOf(
+                    SdCell("btn", "Часовой пояс: $zoneLabel", "public", wide = true) {
+                        showWidgetTimeZoneDialog()
+                    }
+                )))
+                rows.add(SdRow(divider = true))
+                val cityLabel = Store.weatherWidgetCity.ifBlank {
+                    networkWidgetPlace?.name?.let { "Авто · $it" } ?: "Авто · по сети"
+                }
+                rows.add(SdRow(secIcon = "cloud", secTitle = "Погода сейчас",
+                    secDesc = "Температура для выбранного города. Автоопределение по сети может ошибаться при VPN."))
+                rows.add(SdRow(quality = true, label = "Показывать погоду", cells =
+                    listOf(true to "Включено", false to "Выключено").map { (value, label) ->
+                        SdCell("quality_choice", label, sel = Store.weatherWidgetEnabled == value) {
+                            Store.weatherWidgetEnabled = value
+                            refreshWidgetUi(); refreshWidgetData(); rerenderDetail()
+                        }
+                    }))
+                rows.add(SdRow(quality = true, label = "Размер погоды", cells = sizes.map { size ->
+                    SdCell("quality_choice", size, sel = Store.weatherWidgetSize == size) {
+                        Store.weatherWidgetSize = size; refreshWidgetUi(); rerenderDetail()
+                    }
+                }))
+                rows.add(SdRow(cells = listOf(
+                    SdCell("btn", "Город: $cityLabel", "location_city", wide = true) {
+                        showWidgetCityDialog()
+                    }
+                )))
+            }
             "about" -> {
                 rows.add(SdRow(about = true))
                 rows.add(SdRow(cells = listOf(
-                    SdCell("btn", "Проверить обновление", "system_update", lime = true) {
+                    SdCell("btn", "Проверить обновления", "system_update", lime = true, wide = true) {
                         checkUpdates(silent = false)
-                    },
-                    SdCell("btn", "Откат на предыдущую версию", "settings_backup_restore", red = true) {
-                        rollbackVersion()
                     }
+                )))
+                rows.add(SdRow(secIcon = "history", secTitle = "Предыдущие версии",
+                    secDesc = when {
+                        aboutVersionsLoading -> "Загружаем список выпусков…"
+                        aboutVersions.isEmpty() -> "Более ранние сборки не найдены или список недоступен."
+                        else -> "Выберите одну из трёх последних сборок для установки."
+                    }))
+                if (aboutVersions.isEmpty() && !aboutVersionsLoading) rows.add(SdRow(cells = listOf(
+                    SdCell("btn", "Повторить загрузку списка", "refresh", wide = true) {
+                        aboutVersionsLoaded = false
+                        enterSetDetail(setSelected)
+                    }
+                )))
+                for (release in aboutVersions) rows.add(SdRow(cells = listOf(
+                    SdCell("btn", "Версия ${release.versionName}",
+                        "history", wide = true) { confirmRollback(release) }
                 )))
             }
         }
@@ -2645,6 +3549,83 @@ class PlayerActivity : Activity() {
         setRow = r.coerceIn(0, (sdCellViews.size - 1).coerceAtLeast(0))
         setCol = c
         applySdFocus()
+    }
+
+    private fun showWidgetTimeZoneDialog() {
+        val zones = listOf(
+            "Авто по сети или настройке ТВ" to "",
+            "Москва · UTC+3" to "Europe/Moscow",
+            "Калининград · UTC+2" to "Europe/Kaliningrad",
+            "Екатеринбург · UTC+5" to "Asia/Yekaterinburg",
+            "Новосибирск · UTC+7" to "Asia/Novosibirsk",
+            "Владивосток · UTC+10" to "Asia/Vladivostok",
+            "Другой часовой пояс…" to "custom"
+        )
+        AlertDialog.Builder(this).setTitle("Часовой пояс часов")
+            .setItems(zones.map { it.first }.toTypedArray()) { _, choice ->
+                val selected = zones[choice].second
+                if (selected != "custom") {
+                    Store.clockWidgetTimeZone = selected
+                    refreshWidgetUi(); refreshWidgetData(); rerenderDetail()
+                } else {
+                    val input = EditText(this)
+                    input.setSingleLine(true)
+                    input.hint = "Например, Europe/Moscow"
+                    input.setText(Store.clockWidgetTimeZone.ifBlank { TimeZone.getDefault().id })
+                    AlertDialog.Builder(this).setTitle("Часовой пояс")
+                        .setMessage("Введите название часового пояса, например Europe/Moscow или Asia/Almaty")
+                        .setView(input)
+                        .setPositiveButton("Сохранить") { _, _ ->
+                            val value = input.text.toString().trim()
+                            if (TimeZone.getAvailableIDs().contains(value)) {
+                                Store.clockWidgetTimeZone = value
+                                refreshWidgetUi(); rerenderDetail()
+                            } else toast("Часовой пояс не найден. Используйте формат Europe/Moscow")
+                        }.setNegativeButton("Отмена", null).show()
+                }
+            }.show()
+    }
+
+    private fun showWidgetCityDialog() {
+        AlertDialog.Builder(this).setTitle("Город для погоды")
+            .setItems(arrayOf("Автоопределение по сети", "Выбрать другой город")) { _, choice ->
+                if (choice == 0) {
+                    Store.weatherWidgetCity = ""
+                    Store.weatherWidgetLatitude = Float.NaN
+                    Store.weatherWidgetLongitude = Float.NaN
+                    Store.weatherWidgetTemp = Int.MIN_VALUE
+                    Store.weatherWidgetUpdatedAt = 0L
+                    networkWidgetPlace = null
+                    refreshWidgetUi(); refreshWidgetData(force = true); rerenderDetail()
+                } else {
+                    val input = EditText(this)
+                    input.setSingleLine(true)
+                    input.hint = "Например, Москва, Россия"
+                    input.setText(Store.weatherWidgetCity)
+                    AlertDialog.Builder(this).setTitle("Другой город")
+                        .setView(input)
+                        .setPositiveButton("Найти") { _, _ ->
+                            val query = input.text.toString().trim()
+                            if (query.length < 2) { toast("Введите название города"); return@setPositiveButton }
+                            toast("Ищем город…")
+                            Thread {
+                                val place = runCatching { WidgetWeather.findCity(query) }.getOrNull()
+                                runOnUiThread {
+                                    if (place == null) { toast("Город не найден или нет соединения"); return@runOnUiThread }
+                                    Store.weatherWidgetCity = place.name
+                                    Store.weatherWidgetLatitude = place.latitude.toFloat()
+                                    Store.weatherWidgetLongitude = place.longitude.toFloat()
+                                    Store.weatherWidgetTemp = Int.MIN_VALUE
+                                    Store.weatherWidgetUpdatedAt = 0L
+                                    refreshWidgetUi()
+                                    refreshWidgetData(force = true)
+                                    if (panel == Panel.SETTINGS && setItems.getOrNull(setSelected)?.kind == "widgets") rerenderDetail()
+                                    toast("Погода: ${place.name}")
+                                }
+                            }.start()
+                        }.setNegativeButton("Отмена", null).show()
+                }
+            }.show()
     }
 
     private fun renamePlaylistDialog(name: String, url: String) {
@@ -2684,45 +3665,65 @@ class PlayerActivity : Activity() {
     }
 
     private fun renderSetDetail(pos: Int, active: Boolean) {
+        settingsScrollGeneration++
         setDetail.removeAllViews()
         sdCellViews.clear()
         sdCellModels.clear()
         val item = setItems.getOrNull(pos) ?: return
+        val isQrPage = item.kind == "qr"
+        val isSourcesPage = item.kind == "sources"
+        val isQualityPage = item.kind == "quality"
+        val isWidgetsPage = item.kind == "widgets"
+        val isAboutPage = item.kind == "about"
+        setDetailScroll.setPadding(
+            setDetailScroll.paddingLeft,
+            dp(if (isQrPage || isSourcesPage || isQualityPage || isWidgetsPage || isAboutPage) 28 else 52),
+            setDetailScroll.paddingRight,
+            dp(if (isQrPage || isSourcesPage || isQualityPage || isWidgetsPage || isAboutPage) 20 else 36)
+        )
+        if (isQrPage || !active) setDetailScroll.scrollTo(0, 0)
 
         val titleRow = LinearLayout(this)
         titleRow.orientation = LinearLayout.HORIZONTAL
         titleRow.gravity = Gravity.CENTER_VERTICAL
         val tIcon = TextView(this)
         IconFont.apply(tIcon, item.icon)
-        tIcon.setTextColor(0xFF63D4E2.toInt()); tIcon.textSize = 26f
+        tIcon.setTextColor(0xFF63D4E2.toInt()); tIcon.textSize = if (isSourcesPage || isQualityPage || isWidgetsPage || isAboutPage) 23f else 26f
         titleRow.addView(tIcon)
         val tText = TextView(this)
         tText.text = item.label
-        tText.setTextColor(0xFFFFFFFF.toInt()); tText.textSize = 25f
+        tText.setTextColor(0xFFFFFFFF.toInt()); tText.textSize = if (isSourcesPage || isQualityPage || isWidgetsPage || isAboutPage) 22f else 25f
         tText.setTypeface(tText.typeface, android.graphics.Typeface.BOLD)
         val tlp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         tlp.leftMargin = dp(12)
         titleRow.addView(tText, tlp)
-        setDetail.addView(titleRow, mlp(bottom = 10))
+        setDetail.addView(titleRow, mlp(bottom = if (isQrPage || isSourcesPage || isQualityPage || isWidgetsPage || isAboutPage) 6 else 10))
 
         val desc = sectionDesc(item.kind)
-        if (desc.isNotEmpty()) setDetail.addView(sdText(desc, 15f, 0xFFC6D7DD.toInt()), mlp(bottom = 22, maxW = 620))
+        if (desc.isNotEmpty()) setDetail.addView(sdText(desc, 15f, 0xFFC6D7DD.toInt()),
+            mlp(bottom = if (isQrPage) 12 else if (isSourcesPage || isQualityPage || isWidgetsPage || isAboutPage) 16 else 22,
+                maxW = if (isQrPage || isSourcesPage || isQualityPage || isWidgetsPage || isAboutPage) 0 else 620))
 
+        var sourceSectionNumber = 0
         for (r in panelRows(item.kind)) {
             when {
-                r.secIcon != null -> setDetail.addView(sdSection(r), mlp(top = 18, bottom = 8))
+                r.secIcon != null -> {
+                    val top = if (isSourcesPage) { sourceSectionNumber++; if (sourceSectionNumber == 1) 0 else 12 } else 18
+                    setDetail.addView(sdSection(r), mlp(top = top, bottom = if (isSourcesPage) 12 else 8))
+                }
                 r.divider -> {
                     val v = View(this)
                     v.setBackgroundColor(0x1AFFFFFF)
                     setDetail.addView(v, LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT, dp(1)).apply {
-                        topMargin = dp(22); bottomMargin = dp(4) })
+                        topMargin = dp(if (isSourcesPage) 12 else 22)
+                        bottomMargin = dp(if (isSourcesPage) 8 else 4) })
                 }
-                r.about -> setDetail.addView(sdAboutCard(), mlp(bottom = 8).apply { gravity = Gravity.CENTER_HORIZONTAL })
+                r.about -> setDetail.addView(sdAboutCard(), mlp(bottom = 12))
                 r.qr -> setDetail.addView(sdQrBlock(), mlp(bottom = 8).apply { gravity = Gravity.CENTER_HORIZONTAL })
                 r.cells != null -> {
-                    val (view, cellViews) = sdCellRow(r)
-                    setDetail.addView(view, mlp(bottom = if (r.label.isNotEmpty()) 16 else 9))
+                    val (view, cellViews) = if (r.quality) sdQualityRow(r) else sdCellRow(r)
+                    setDetail.addView(view, mlp(bottom = if (r.quality) 10 else if (r.label.isNotEmpty()) 16 else 8))
                     sdCellViews.add(cellViews)
                     sdCellModels.add(r.cells)
                 }
@@ -2761,39 +3762,52 @@ class PlayerActivity : Activity() {
         head.addView(ic)
         val t = sdText(r.secTitle, 20f, 0xFFFFFFFF.toInt(), bold = true)
         head.addView(t, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(9) })
+            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(9) })
+        if (r.secCount >= 0) {
+            val count = sdText(r.secCount.toString(), 13f, 0xFFBDEEF4.toInt(), bold = true)
+            count.gravity = Gravity.CENTER
+            count.setBackgroundResource(R.drawable.sd_count_badge)
+            count.minWidth = dp(30)
+            count.setPadding(dp(8), dp(3), dp(8), dp(3))
+            head.addView(count)
+        }
         box.addView(head)
         if (r.secDesc.isNotEmpty()) {
             box.addView(sdText(r.secDesc, 13.5f, 0xFFA9C0C8.toInt()),
-                LinearLayout.LayoutParams(dp(600), LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(5) })
+                LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
         }
         return box
     }
 
     private fun sdAboutCard(): View {
         val card = LinearLayout(this)
-        card.orientation = LinearLayout.VERTICAL
-        card.gravity = Gravity.CENTER_HORIZONTAL
+        card.orientation = LinearLayout.HORIZONTAL
+        card.gravity = Gravity.CENTER_VERTICAL
         card.setBackgroundResource(R.drawable.sd_about)
-        card.setPadding(dp(30), dp(22), dp(30), dp(22))
+        card.setPadding(dp(18), dp(16), dp(18), dp(16))
+        val logo = ImageView(this)
+        logo.setImageResource(R.mipmap.ic_launcher)
+        logo.scaleType = ImageView.ScaleType.FIT_CENTER
+        logo.contentDescription = "Логотип BQDiptv"
+        logo.outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: Outline) {
+                outline.setRoundRect(0, 0, view.width, view.height, dp(14).toFloat())
+            }
+        }
+        logo.clipToOutline = true
+        card.addView(logo, LinearLayout.LayoutParams(dp(72), dp(72)).apply { rightMargin = dp(18) })
 
-        val appRow = LinearLayout(this)
-        appRow.orientation = LinearLayout.HORIZONTAL
-        appRow.gravity = Gravity.CENTER_VERTICAL
-        val ic = TextView(this)
-        IconFont.apply(ic, "live_tv")
-        ic.setTextColor(0xFF63D4E2.toInt()); ic.textSize = 24f
-        appRow.addView(ic)
-        appRow.addView(sdText("BQDiptv", 22f, 0xFFFFFFFF.toInt(), bold = true),
-            LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(11) })
-        card.addView(appRow)
-
-        val ver = sdText("Версия: ${UpdateManager.currentName(this)}\nСборка: ${UpdateManager.currentCode(this)} · Android TV",
-            14f, 0xFFA9C0C8.toInt())
-        ver.gravity = Gravity.CENTER
-        card.addView(ver, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(9) })
+        val details = LinearLayout(this)
+        details.orientation = LinearLayout.VERTICAL
+        details.addView(sdText("BQDiptv", 22f, 0xFFFFFFFF.toInt(), bold = true))
+        details.addView(sdText("Версия ${UpdateManager.currentName(this)}", 16f, 0xFFE6F4F7.toInt()),
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
+        details.addView(sdText("Сборка ${UpdateManager.currentCode(this)}  ·  Android TV", 13f,
+            0xFFA9C0C8.toInt()), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(2) })
+        card.addView(details, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         return card
     }
 
@@ -2803,22 +3817,88 @@ class PlayerActivity : Activity() {
         box.gravity = Gravity.CENTER_HORIZONTAL
         val url = "http://${IpUtil.localIp()}:${WebConfigServer.PORT}"
         val img = ImageView(this)
-        try {
-            val size = 480
-            val matrix = QRCodeWriter().encode(url, BarcodeFormat.QR_CODE, size, size)
-            val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.RGB_565)
-            for (x in 0 until size) for (y in 0 until size)
-                bmp.setPixel(x, y, if (matrix.get(x, y)) Color.BLACK else Color.WHITE)
-            img.setImageBitmap(bmp)
-        } catch (_: Exception) { }
+        val cached = settingsQrCachedBitmap.takeIf { settingsQrCachedUrl == url }
+        if (cached != null) {
+            img.setImageBitmap(cached)
+        } else {
+            if (settingsQrLoadingUrl != url) {
+                settingsQrWaitingImages.clear()
+                settingsQrLoadingUrl = url
+                Thread {
+                    val bitmap = try {
+                        val size = 480
+                        val matrix = QRCodeWriter().encode(url, BarcodeFormat.QR_CODE, size, size)
+                        Bitmap.createBitmap(size, size, Bitmap.Config.RGB_565).also { bmp ->
+                            for (x in 0 until size) for (y in 0 until size)
+                                bmp.setPixel(x, y, if (matrix.get(x, y)) Color.BLACK else Color.WHITE)
+                        }
+                    } catch (_: Exception) { null }
+                    runOnUiThread {
+                        if (settingsQrLoadingUrl == url) {
+                            settingsQrLoadingUrl = null
+                            if (bitmap != null) {
+                                settingsQrCachedUrl = url
+                                settingsQrCachedBitmap = bitmap
+                                settingsQrWaitingImages.forEach { it.setImageBitmap(bitmap) }
+                            }
+                            settingsQrWaitingImages.clear()
+                        }
+                    }
+                }.start()
+            }
+            settingsQrWaitingImages.add(img)
+        }
         img.setBackgroundColor(0xFFFFFFFF.toInt())
         img.setPadding(dp(10), dp(10), dp(10), dp(10))
-        box.addView(img, LinearLayout.LayoutParams(dp(260), dp(260)))
+        box.addView(img, LinearLayout.LayoutParams(dp(220), dp(220)))
         val tv = sdText(url, 24f, 0xFF63D4E2.toInt(), bold = true)
         tv.gravity = Gravity.CENTER
         box.addView(tv, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(14) })
         return box
+    }
+
+    private fun sdQualityRow(r: SdRow): Pair<View, List<View>> {
+        val card = LinearLayout(this)
+        card.orientation = LinearLayout.VERTICAL
+        card.setBackgroundResource(R.drawable.sd_quality_group)
+        card.setPadding(dp(14), dp(13), dp(14), dp(14))
+        card.addView(sdText(r.label, 17f, 0xFFFFFFFF.toInt(), bold = true))
+        if (r.secDesc.isNotEmpty()) {
+            card.addView(sdText(r.secDesc, 13f, 0xFFB7CBD2.toInt()),
+                LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(3) })
+        }
+
+        val views = ArrayList<View>()
+        val cells = r.cells.orEmpty()
+        val rowIndex = sdCellViews.size
+        for (start in cells.indices step 3) {
+            val line = LinearLayout(this)
+            line.orientation = LinearLayout.HORIZONTAL
+            val end = (start + 3).coerceAtMost(cells.size)
+            for (index in start until end) {
+                val cell = cells[index]
+                val choice = sdCellView(cell)
+                choice.contentDescription = "${r.label}: ${cell.label}${if (cell.sel) ", выбрано" else ""}"
+                choice.setOnClickListener {
+                    if (!setDetailActive) enterSetDetail(setSelected)
+                    setRow = rowIndex
+                    setCol = index
+                    applySdFocus()
+                    cell.action()
+                }
+                line.addView(choice, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
+                    if (index > start) leftMargin = dp(8)
+                })
+                views.add(choice)
+            }
+            card.addView(line, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = dp(if (start == 0) 11 else 8)
+            })
+        }
+        return Pair(card, views)
     }
 
     private fun sdCellRow(r: SdRow): Pair<View, List<View>> {
@@ -2834,17 +3914,26 @@ class PlayerActivity : Activity() {
         line.gravity = Gravity.CENTER_VERTICAL
         val views = ArrayList<View>()
         val cells = r.cells ?: emptyList()
+        val rowIndex = sdCellViews.size
         for ((i, c) in cells.withIndex()) {
             val v = sdCellView(c)
+            v.setOnClickListener {
+                if (!setDetailActive) enterSetDetail(setSelected)
+                setRow = rowIndex
+                setCol = i
+                applySdFocus()
+                c.action()
+            }
             val lp = when {
                 c.type == "field" || (c.type == "name") ->
                     LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                c.type == "ic" -> LinearLayout.LayoutParams(dp(48), dp(48))
                 c.wide -> LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT)
                 else -> LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT)
             }
-            if (i > 0) lp.leftMargin = dp(10)
+            if (i > 0) lp.leftMargin = dp(if (c.type == "ic") 6 else 10)
             line.addView(v, lp)
             views.add(v)
         }
@@ -2854,6 +3943,20 @@ class PlayerActivity : Activity() {
     }
 
     private fun sdCellView(c: SdCell): View = when (c.type) {
+        "quality_choice" -> {
+            val tv = TextView(this)
+            tv.text = if (c.sel) "${c.label}  ✓" else c.label
+            tv.textSize = 13.5f
+            tv.gravity = Gravity.CENTER
+            tv.isSingleLine = true
+            tv.ellipsize = android.text.TextUtils.TruncateAt.END
+            tv.setTypeface(tv.typeface, android.graphics.Typeface.BOLD)
+            tv.setTextColor(if (c.sel) 0xFFFFFFFF.toInt() else 0xFFC6D9DF.toInt())
+            tv.setBackgroundResource(if (c.sel) R.drawable.sd_quality_choice_selected
+                else R.drawable.sd_quality_choice)
+            tv.setPadding(dp(5), dp(5), dp(5), dp(5))
+            tv
+        }
         "toggle" -> {
             val box = LinearLayout(this)
             box.orientation = LinearLayout.HORIZONTAL
@@ -2888,6 +3991,12 @@ class PlayerActivity : Activity() {
             IconFont.apply(tv, c.icon)
             tv.textSize = 19f
             tv.gravity = Gravity.CENTER
+            tv.contentDescription = when (c.icon) {
+                "edit" -> "Изменить ${c.label2}"
+                "sync" -> "Обновить ${c.label2}"
+                "delete" -> "Удалить ${c.label2}"
+                else -> c.label2
+            }
             tv.setTextColor(when {
                 c.del -> 0xFFFF8A8A.toInt()
                 c.refr -> 0xFFA3E05F.toInt()
@@ -2898,21 +4007,29 @@ class PlayerActivity : Activity() {
                 c.refr -> R.drawable.sd_ic_lime
                 else -> R.drawable.sd_ic
             })
-            tv.layoutParams = LinearLayout.LayoutParams(dp(44), dp(44))
-            tv.setPadding(0, dp(11), 0, 0)
+            tv.minWidth = dp(48)
+            tv.minHeight = dp(48)
             tv
         }
         "name" -> {
-            val tv = TextView(this)
-            tv.text = c.label
-            tv.textSize = 15f
-            tv.setTypeface(tv.typeface, android.graphics.Typeface.BOLD)
-            tv.setTextColor(0xFFEAF4F7.toInt())
-            tv.setBackgroundResource(R.drawable.sd_name)
-            tv.setPadding(dp(16), dp(13), dp(16), dp(13))
-            tv.isSingleLine = true
-            tv.ellipsize = android.text.TextUtils.TruncateAt.END
-            tv
+            val card = LinearLayout(this)
+            card.orientation = LinearLayout.VERTICAL
+            card.gravity = Gravity.CENTER_VERTICAL
+            card.setBackgroundResource(R.drawable.sd_name)
+            card.setPadding(dp(14), dp(8), dp(12), dp(8))
+            card.minimumHeight = dp(56)
+            card.contentDescription = "${c.label}. ${c.label2}. Изменить название"
+            val name = sdText(c.label, 15f, 0xFFEAF4F7.toInt(), bold = true)
+            name.isSingleLine = true
+            name.ellipsize = android.text.TextUtils.TruncateAt.END
+            card.addView(name)
+            if (c.label2.isNotEmpty()) {
+                val url = sdText(c.label2, 11f, 0xFFA9C0C8.toInt())
+                url.isSingleLine = true
+                url.ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+                card.addView(url)
+            }
+            card
         }
         "field" -> {
             val tv = TextView(this)
@@ -2929,6 +4046,8 @@ class PlayerActivity : Activity() {
             val row = LinearLayout(this)
             row.orientation = LinearLayout.HORIZONTAL
             row.gravity = Gravity.CENTER
+            row.minimumHeight = dp(52)
+            row.contentDescription = c.label
             row.setBackgroundResource(if (c.primary) R.drawable.sd_card_primary else R.drawable.sd_card)
             row.setPadding(dp(16), dp(13), dp(16), dp(13))
             val ic = TextView(this)
@@ -2956,15 +4075,37 @@ class PlayerActivity : Activity() {
                 target.isActivated = on
             }
         }
-        if (setDetailActive) sdCellViews.getOrNull(setRow)?.firstOrNull()?.let { v ->
+        val scrollGeneration = ++settingsScrollGeneration
+        if (setDetailActive && setItems.getOrNull(setSelected)?.kind != "qr")
+            sdCellViews.getOrNull(setRow)?.getOrNull(setCol)?.let { v ->
             setDetailScroll.post {
+                if (!setDetailActive || scrollGeneration != settingsScrollGeneration) return@post
+                if (setRow == 0) {
+                    setDetailScroll.smoothScrollTo(0, 0)
+                    return@post
+                }
+                if (setRow == sdCellViews.lastIndex) {
+                    val maxScroll = (setDetail.bottom + setDetailScroll.paddingBottom -
+                        setDetailScroll.height).coerceAtLeast(0)
+                    setDetailScroll.smoothScrollTo(0, maxScroll)
+                    return@post
+                }
                 var y = 0
                 var node: View? = v
                 while (node != null && node !== setDetail) {
                     y += node.top
                     node = node.parent as? View
                 }
-                setDetailScroll.smoothScrollTo(0, (y - dp(140)).coerceAtLeast(0))
+                val top = setDetail.top + y
+                val bottom = top + v.height
+                val visibleTop = setDetailScroll.scrollY + dp(12)
+                val visibleBottom = setDetailScroll.scrollY + setDetailScroll.height -
+                    setDetailScroll.paddingBottom - dp(12)
+                when {
+                    top < visibleTop -> setDetailScroll.smoothScrollTo(0, (top - dp(12)).coerceAtLeast(0))
+                    bottom > visibleBottom -> setDetailScroll.smoothScrollTo(0,
+                        bottom - setDetailScroll.height + setDetailScroll.paddingBottom + dp(12))
+                }
             }
         }
     }

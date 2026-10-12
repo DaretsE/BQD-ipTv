@@ -153,8 +153,11 @@ object EpgManager {
 
     data class Prog(val start: Long, val stop: Long, val title: String, val desc: String)
 
-    @Volatile private var progs: Map<String, List<Prog>> = emptyMap()
-    @Volatile private var nameToId: Map<String, String> = emptyMap()
+    private data class Snapshot(
+        val progs: Map<String, List<Prog>>,
+        val nameToId: Map<String, String>
+    )
+    @Volatile private var snapshot = Snapshot(emptyMap(), emptyMap())
     private val icons = ConcurrentHashMap<String, String>()   // постоянный, только пополняется
 
     @Volatile var loaded = false; private set
@@ -183,13 +186,14 @@ object EpgManager {
     fun status(): String = when {
         loading && programCount > 0 -> "Обновление программы… (показаны прежние данные)"
         loading -> "Программа загружается…"
+        programCount > 0 && lastError.isNotEmpty() -> "Показана прежняя EPG: $lastError"
         programCount > 0 -> "Загружено передач: $programCount"
         lastError.isNotEmpty() -> "Ошибка EPG: $lastError"
         else -> "EPG не настроен"
     }
 
     fun clearAll() {
-        progs = emptyMap(); nameToId = emptyMap(); icons.clear()
+        snapshot = Snapshot(emptyMap(), emptyMap()); icons.clear()
         loaded = false; programCount = 0; lastError = ""; lastLoadedAt = 0L; cacheSavedAt = 0L
     }
 
@@ -204,17 +208,30 @@ object EpgManager {
                 val newIcons = HashMap<String, String>()
                 val counter = intArrayOf(0)
                 var err = ""
+                var complete = true
                 for (u in list) {
-                    try { parseOne(u, newProgs, newNames, newIcons, counter) }
-                    catch (e: Throwable) { err = (e.message ?: "ошибка") }
-                    if (counter[0] >= MAX_PROGRAMS) break
+                    val before = counter[0]
+                    try {
+                        parseOne(u, newProgs, newNames, newIcons, counter)
+                        if (counter[0] == before) {
+                            complete = false
+                            err = "Источник EPG не содержит актуальных передач"
+                        }
+                    } catch (e: Throwable) {
+                        complete = false
+                        err = e.message ?: "Ошибка источника EPG"
+                    }
+                    if (counter[0] >= MAX_PROGRAMS) {
+                        complete = false
+                        err = "Превышен лимит передач EPG"
+                        break
+                    }
                 }
                 val total = counter[0]
-                if (total > 0) {
+                if (total > 0 && complete) {
                     for (l in newProgs.values) l.sortBy { it.start }
-                    // атомарная подмена готовых данных
-                    progs = newProgs
-                    nameToId = newNames
+                    // Одна публикация готовой программы и индекса имён для всех читателей.
+                    snapshot = Snapshot(newProgs, newNames)
                     for ((k, v) in newIcons) icons[k] = v
                     programCount = total
                     loaded = true
@@ -224,7 +241,7 @@ object EpgManager {
                     saveDisk(newProgs, newNames, icons)   // сохраняем, чтобы пережить перезапуск/обновление
                 } else {
                     // ничего не распарсилось — оставляем прежние данные, фиксируем ошибку
-                    if (err.isNotEmpty()) lastError = err
+                    lastError = err.ifEmpty { "Не удалось полностью обновить EPG" }
                 }
             } catch (t: Throwable) {
                 lastError = t.message ?: "ошибка EPG"
@@ -332,23 +349,26 @@ object EpgManager {
             .replace(Regex("[^a-zа-я0-9]"), "")
             .trim()
 
-    fun resolveId(ch: Channel): String {
+    private fun resolveId(ch: Channel, data: Snapshot): String {
         val tid = ch.tvgId.lowercase()
-        if (tid.isNotEmpty() && progs.containsKey(tid)) return tid
-        val byName = nameToId[normalize(ch.name)]
-        if (byName != null && progs.containsKey(byName)) return byName
+        if (tid.isNotEmpty() && data.progs.containsKey(tid)) return tid
+        val byName = data.nameToId[normalize(ch.name)]
+        if (byName != null && data.progs.containsKey(byName)) return byName
         return tid
     }
 
-    fun programsFor(ch: Channel): List<Prog> = progs[resolveId(ch)] ?: emptyList()
+    fun resolveId(ch: Channel): String = resolveId(ch, snapshot)
+
+    fun programsFor(ch: Channel): List<Prog> = snapshot.let { it.progs[resolveId(ch, it)] ?: emptyList() }
 
     /** Сколько каналов из списка реально сопоставлены с телепрограммой (есть передачи). */
     fun matchedChannelCount(channels: List<Channel>): Int {
+        val data = snapshot
         var n = 0
         val seen = HashSet<String>()
         for (c in channels) {
-            val id = resolveId(c)
-            if (id.isNotEmpty() && progs.containsKey(id) && seen.add(id)) n++
+            val id = resolveId(c, data)
+            if (id.isNotEmpty() && data.progs.containsKey(id) && seen.add(id)) n++
         }
         return n
     }
@@ -413,12 +433,10 @@ object EpgManager {
             if (tmp.renameTo(f)) {
                 if (hadOld) try { bak.delete() } catch (_: Throwable) {}
             } else {
-                // переименование не прошло — копируем и оставляем bak как страховку
-                tmp.copyTo(f, overwrite = true)
-                tmp.delete()
-                if (hadOld && f.exists() && f.length() > 0L) {
-                    try { bak.delete() } catch (_: Throwable) {}
-                }
+                // Не копируем частями поверх рабочего файла: при прерывании
+                // установки APK страховочная копия должна остаться целой.
+                if (hadOld) try { bak.renameTo(f) } catch (_: Throwable) {}
+                try { tmp.delete() } catch (_: Throwable) {}
             }
         } catch (_: Throwable) {
             try { tmp.delete() } catch (_: Throwable) {}
@@ -470,7 +488,7 @@ object EpgManager {
                 val nn = HashMap<String, String>(nmN * 2)
                 for (a in 0 until nmN) { val k = i.readUTF(); val v = i.readUTF(); nn[k] = v }
                 if (total > 0 && !loaded && !loading) {
-                    progs = np; nameToId = nn
+                    snapshot = Snapshot(np, nn)
                     programCount = total; loaded = true; lastLoadedAt = savedAt; cacheSavedAt = savedAt
                     return true
                 }
@@ -546,7 +564,7 @@ object EpgManager {
     @Synchronized
     private fun ensureIndex() {
         if (searchIndexAt == lastLoadedAt && searchIndex.isNotEmpty()) return
-        val src = progs
+        val src = snapshot.progs
         val idx = HashMap<String, List<IdxProg>>(src.size * 2)
         for ((id, list) in src) {
             idx[id] = list.map { IdxProg(it, normLoose(it.title)) }

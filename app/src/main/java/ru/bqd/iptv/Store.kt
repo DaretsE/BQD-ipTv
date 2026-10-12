@@ -23,14 +23,8 @@ object Store {
         migrate()
     }
 
-    // Страховка на случай вылета из-за слишком большой EPG.
-    //
-    // Раньше этот обработчик сносил кэш программы при ЛЮБОМ необработанном
-    // исключении в ЛЮБОМ потоке. То есть случайный сбой где угодно в приложении
-    // стоил пользователю многомегабайтной телепрограммы и пяти минут повторной
-    // закачки. Теперь удаляем кэш только в том единственном случае, ради
-    // которого страховка и делалась: нехватка памяти во время разбора EPG.
-    // Во всех остальных ситуациях кэш не трогаем — он не виноват.
+    // При аварии можно удалить только незавершённый временный файл. Готовые
+    // epg_cache.bin и .bak должны пережить сбой и установку новой версии APK.
     private var crashGuardInstalled = false
     private fun installCrashGuard() {
         if (crashGuardInstalled) return
@@ -38,29 +32,28 @@ object Store {
         val prev = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
             try {
-                if (EpgManager.loading && isOom(e)) {
-                    File(cacheDir, "epg_cache.bin").delete()
-                    File(cacheDir, "epg_cache.bin.bak").delete()
-                }
-                // недописанный временный файл убираем всегда — он бесполезен
                 File(cacheDir, "epg_cache.bin.tmp").delete()
             } catch (_: Throwable) {}
             prev?.uncaughtException(t, e)
         }
     }
 
-    private fun isOom(e: Throwable?): Boolean {
-        var cur = e
-        var depth = 0
-        while (cur != null && depth < 8) {
-            if (cur is OutOfMemoryError) return true
-            cur = cur.cause
-            depth++
-        }
-        return false
-    }
-
     private fun migrate() {
+        // Разовая нормализация после проверки настроек качества: прежнее меню
+        // предлагало одинаковые «Авто»/«Максимум» и размеры буфера ниже 30 сек,
+        // которые плеер всё равно превращал в 30. Сразу включаем понятный
+        // безопасный набор; последующие изменения пользователя сохраняются.
+        if (!prefs.getBoolean("quality_defaults_reviewed_v1", false)) {
+            prefs.edit()
+                .putString("quality", "auto")
+                .putInt("buffer_sec", 30)
+                .putInt("live_offset_sec", 0)
+                .putString("retry_mode", "normal")
+                .putString("decoder", "hw")
+                .putBoolean("afr", false)
+                .putBoolean("quality_defaults_reviewed_v1", true)
+                .apply()
+        }
         // старый одиночный EPG -> список источников
         val old = prefs.getString("epg_url", "") ?: ""
         if (old.isNotEmpty() && getEpgSources().isEmpty()) { addEpgSource("", old); prefs.edit().remove("epg_url").apply() }
@@ -83,11 +76,69 @@ object Store {
         get() = prefs.getString("ui_mode", "") ?: ""
         set(v) { prefs.edit().putString("ui_mode", v).apply() }
 
+    var setupDeferred: Boolean
+        get() = prefs.getBoolean("setup_deferred", false)
+        set(v) { prefs.edit().putBoolean("setup_deferred", v).apply() }
+
+    var clockWidgetEnabled: Boolean
+        get() = prefs.getBoolean("clock_widget_enabled", true)
+        set(v) { prefs.edit().putBoolean("clock_widget_enabled", v).apply() }
+
+    var weatherWidgetEnabled: Boolean
+        get() = prefs.getBoolean("weather_widget_enabled", true)
+        set(v) { prefs.edit().putBoolean("weather_widget_enabled", v).apply() }
+
+    var clockWidgetSize: String
+        get() = prefs.getString("clock_widget_size", "M") ?: "M"
+        set(v) { prefs.edit().putString("clock_widget_size", v).apply() }
+
+    var weatherWidgetSize: String
+        get() = prefs.getString("weather_widget_size", "M") ?: "M"
+        set(v) { prefs.edit().putString("weather_widget_size", v).apply() }
+
+    var widgetSide: String
+        get() = prefs.getString("widget_side", "left") ?: "left"
+        set(v) { prefs.edit().putString("widget_side", v).apply() }
+
+    /** Empty means the detected network timezone, then the device timezone. */
+    var clockWidgetTimeZone: String
+        get() = prefs.getString("clock_widget_timezone", "") ?: ""
+        set(v) { prefs.edit().putString("clock_widget_timezone", v).apply() }
+
+    /** Empty means detected network city. */
+    var weatherWidgetCity: String
+        get() = prefs.getString("weather_widget_city", "") ?: ""
+        set(v) { prefs.edit().putString("weather_widget_city", v).apply() }
+
+    var weatherWidgetLatitude: Float
+        get() = prefs.getFloat("weather_widget_latitude", Float.NaN)
+        set(v) { prefs.edit().putFloat("weather_widget_latitude", v).apply() }
+
+    var weatherWidgetLongitude: Float
+        get() = prefs.getFloat("weather_widget_longitude", Float.NaN)
+        set(v) { prefs.edit().putFloat("weather_widget_longitude", v).apply() }
+
+    var weatherWidgetTemp: Int
+        get() = prefs.getInt("weather_widget_temp", Int.MIN_VALUE)
+        set(v) { prefs.edit().putInt("weather_widget_temp", v).apply() }
+
+    var weatherWidgetCode: Int
+        get() = prefs.getInt("weather_widget_code", -1)
+        set(v) { prefs.edit().putInt("weather_widget_code", v).apply() }
+
+    var weatherWidgetDay: Boolean
+        get() = prefs.getBoolean("weather_widget_day", true)
+        set(v) { prefs.edit().putBoolean("weather_widget_day", v).apply() }
+
+    var weatherWidgetUpdatedAt: Long
+        get() = prefs.getLong("weather_widget_updated_at", 0L)
+        set(v) { prefs.edit().putLong("weather_widget_updated_at", v).apply() }
+
     var livePreview: Boolean
         get() = prefs.getBoolean("live_preview", false)
         set(v) { prefs.edit().putBoolean("live_preview", v).apply() }
 
-    // ---------- Качество трансляции: auto / stable / max ----------
+    // ---------- Качество трансляции: auto / stable (лимит 720p) ----------
     var quality: String
         get() = prefs.getString("quality", "auto") ?: "auto"
         set(v) { prefs.edit().putString("quality", v).apply() }
@@ -221,11 +272,7 @@ object Store {
 
     // ---------- Качество трансляции (реальные параметры воспроизведения) ----------
 
-    /**
-     * Отставание от прямого эфира, сек. 0 — как отдаёт поток.
-     * Самый действенный параметр при слабом интернете: запас времени
-     * позволяет пережить провалы связи без остановки картинки.
-     */
+    /** Отставание от live-края для поддерживаемых потоков; 0 оставляет настройки источника. */
     var liveOffsetSec: Int
         get() = prefs.getInt("live_offset_sec", 0)
         set(v) { prefs.edit().putInt("live_offset_sec", v).apply() }
@@ -245,21 +292,7 @@ object Store {
         get() = prefs.getString("retry_mode", "normal") ?: "normal"
         set(v) { prefs.edit().putString("retry_mode", v).apply() }
 
-    /**
-     * Универсальные рекомендуемые настройки качества — работают на любом устройстве
-     * и на любом канале. Именно к ним ведёт кнопка «Настройки по умолчанию».
-     *
-     * Подобраны так, чтобы убрать периодические замирания эфира:
-     *  - буфер 30 сек: даёт ExoPlayer запас на минимум 20 сек, поток не «капает»;
-     *  - «Как в потоке»: плеер идёт ровно 1.0x и ничего не догоняет — именно
-     *    попытка держать заданное отставание разгоняла плеер и роняла картинку;
-     *  - «Обычно»: сбалансированные таймауты и число переподключений;
-     *  - «Авто»: потолок качества выбирает сам поток;
-     *  - аппаратный декодер: быстрый и не греет процессор (совместим с 99% боксов;
-     *    если конкретный канал сыпется — пользователь вручную включит программный);
-     *  - автофреймрейт выключен: он трогает режим экрана и на части ТВ сам вызывает
-     *    рывки, а выгода от него узкая (плавность 25 fps на 60 Гц).
-     */
+    /** Сбалансированный набор для старта; на конкретном потоке эффект может отличаться. */
     fun applyRecommendedQuality() {
         prefs.edit()
             .putInt("buffer_sec", 30)
