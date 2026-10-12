@@ -46,8 +46,8 @@ android {
             buildConfigField "boolean", "VIDEO_PLACEHOLDER", (project.findProperty('videoPlaceholder') ?: 'true').toString()
         }
         release {
-            // Временный режим предпросмотра: релиз показывает статичную заглушку и не запускает поток.
-            buildConfigField "boolean", "VIDEO_PLACEHOLDER", "true"
+            // На телевизоре воспроизводим канал; заставка остаётся для пустого плейлиста.
+            buildConfigField "boolean", "VIDEO_PLACEHOLDER", "false"
             minifyEnabled false
             // Подписываем релиз только если переданы данные ключа (есть в Actions).
             if (System.getenv("KEYSTORE_PATH") != null) {
