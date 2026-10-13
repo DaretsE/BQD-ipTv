@@ -68,6 +68,7 @@ class PlayerActivity : Activity() {
     private var widgetVisibilityTarget: Boolean? = null
     private var networkWidgetPlace: WidgetWeather.Place? = null
     private var widgetWeatherPlaceName = ""
+    private var widgetWeatherError = ""
     private var widgetRequestGeneration = 0
     private var playerReleased = false
 
@@ -257,6 +258,7 @@ class PlayerActivity : Activity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_player)
         Store.init(this)
+        networkWidgetPlace = Store.savedWeatherNetworkPlace()
         EpgManager.loadDiskCache()
         detectDevice()
         bindViews()
@@ -1363,14 +1365,17 @@ class PlayerActivity : Activity() {
 
     private fun refreshWidgetData(force: Boolean = false) {
         val now = System.currentTimeMillis()
+        if (force) widgetWeatherError = ""
         widgetNextRefreshAt = now + 30L * 60 * 1000
         val manualCity = Store.weatherWidgetCity
         val manualLat = Store.weatherWidgetLatitude
         val manualLon = Store.weatherWidgetLongitude
         val needWeather = Store.weatherWidgetEnabled && (force ||
             Store.weatherWidgetTemp == Int.MIN_VALUE || now - Store.weatherWidgetUpdatedAt >= 30L * 60 * 1000)
-        val needNetwork = networkWidgetPlace == null && (Store.clockWidgetTimeZone.isBlank() ||
-            (Store.weatherWidgetEnabled && manualCity.isBlank()))
+        val networkLocationUsed = Store.clockWidgetTimeZone.isBlank() ||
+            (Store.weatherWidgetEnabled && manualCity.isBlank())
+        val needNetwork = networkLocationUsed && (networkWidgetPlace == null ||
+            now - Store.weatherNetworkDetectedAt >= 24L * 3600 * 1000)
         if (!needWeather && !needNetwork) return
         val generation = ++widgetRequestGeneration
         Thread {
@@ -1382,18 +1387,27 @@ class PlayerActivity : Activity() {
                 runCatching { WidgetWeather.current(place) }.getOrNull() else null
             runOnUiThread {
                 if (generation != widgetRequestGeneration || isFinishing) return@runOnUiThread
-                if (detected != null) networkWidgetPlace = detected
+                if (detected != null) {
+                    networkWidgetPlace = detected
+                    Store.saveWeatherNetworkPlace(detected)
+                }
                 if (place != null) widgetWeatherPlaceName = place.name
                 if (conditions != null) {
                     Store.weatherWidgetTemp = conditions.temperature
                     Store.weatherWidgetCode = conditions.code
                     Store.weatherWidgetDay = conditions.isDay
                     Store.weatherWidgetUpdatedAt = System.currentTimeMillis()
-                } else if (needWeather) widgetNextRefreshAt = System.currentTimeMillis() + 5L * 60 * 1000
+                    widgetWeatherError = ""
+                } else if (needWeather) {
+                    widgetWeatherError = if (place == null)
+                        "Не удалось определить город по сети. Выберите его вручную."
+                    else "Нет связи с сервисом погоды. Проверьте интернет и повторите загрузку."
+                    widgetNextRefreshAt = System.currentTimeMillis() + 5L * 60 * 1000
+                }
                 refreshWidgetUi()
                 if (::setDetail.isInitialized && panel == Panel.SETTINGS &&
-                    setItems.getOrNull(setSelected)?.kind == "widgets" && !setDetailActive) {
-                    renderSetDetail(setSelected, active = false)
+                    setItems.getOrNull(setSelected)?.kind == "widgets") {
+                    rerenderDetail()
                 }
             }
         }.start()
@@ -3495,8 +3509,13 @@ class PlayerActivity : Activity() {
                 val cityLabel = Store.weatherWidgetCity.ifBlank {
                     networkWidgetPlace?.name?.let { "Авто · $it" } ?: "Авто · по сети"
                 }
+                val weatherStatus = when {
+                    widgetWeatherError.isNotEmpty() -> widgetWeatherError
+                    Store.weatherWidgetTemp == Int.MIN_VALUE -> "Загружаем погоду…"
+                    else -> "Последние данные: ${Store.weatherWidgetTemp}°"
+                }
                 rows.add(SdRow(secIcon = "cloud", secTitle = "Погода сейчас",
-                    secDesc = "Температура для выбранного города. Автоопределение по сети может ошибаться при VPN."))
+                    secDesc = "$weatherStatus Автоопределение по сети может ошибаться при VPN."))
                 rows.add(SdRow(quality = true, label = "Показывать погоду", cells =
                     listOf(true to "Включено", false to "Выключено").map { (value, label) ->
                         SdCell("quality_choice", label, sel = Store.weatherWidgetEnabled == value) {
@@ -3512,6 +3531,13 @@ class PlayerActivity : Activity() {
                 rows.add(SdRow(cells = listOf(
                     SdCell("btn", "Город: $cityLabel", "location_city", wide = true) {
                         showWidgetCityDialog()
+                    }
+                )))
+                rows.add(SdRow(cells = listOf(
+                    SdCell("btn", "Обновить погоду", "sync", wide = true) {
+                        widgetWeatherError = ""
+                        refreshWidgetData(force = true)
+                        rerenderDetail()
                     }
                 )))
             }
