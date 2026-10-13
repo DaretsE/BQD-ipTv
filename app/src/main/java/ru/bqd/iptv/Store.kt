@@ -134,6 +134,31 @@ object Store {
         get() = prefs.getLong("weather_widget_updated_at", 0L)
         set(v) { prefs.edit().putLong("weather_widget_updated_at", v).apply() }
 
+    fun savedWeatherNetworkPlace(): WidgetWeather.Place? {
+        val latitude = prefs.getFloat("weather_network_latitude", Float.NaN)
+        val longitude = prefs.getFloat("weather_network_longitude", Float.NaN)
+        if (!latitude.isFinite() || !longitude.isFinite()) return null
+        return WidgetWeather.Place(
+            prefs.getString("weather_network_city", "") ?: "",
+            latitude.toDouble(), longitude.toDouble(),
+            prefs.getString("weather_network_timezone", "") ?: ""
+        )
+    }
+
+    var weatherNetworkDetectedAt: Long
+        get() = prefs.getLong("weather_network_detected_at", 0L)
+        set(v) { prefs.edit().putLong("weather_network_detected_at", v).apply() }
+
+    fun saveWeatherNetworkPlace(place: WidgetWeather.Place) {
+        prefs.edit()
+            .putString("weather_network_city", place.name)
+            .putFloat("weather_network_latitude", place.latitude.toFloat())
+            .putFloat("weather_network_longitude", place.longitude.toFloat())
+            .putString("weather_network_timezone", place.timeZone)
+            .putLong("weather_network_detected_at", System.currentTimeMillis())
+            .apply()
+    }
+
     var livePreview: Boolean
         get() = prefs.getBoolean("live_preview", false)
         set(v) { prefs.edit().putBoolean("live_preview", v).apply() }

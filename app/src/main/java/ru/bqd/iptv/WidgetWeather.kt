@@ -36,6 +36,12 @@ object WidgetWeather {
     }
 
     fun detectPlace(): Place {
+        return runCatching { detectGeoJs() }.getOrElse {
+            detectIpWhoIs()
+        }
+    }
+
+    private fun detectGeoJs(): Place {
         val json = getJson("https://get.geojs.io/v1/ip/geo.json")
         val lat = json.getString("latitude").toDouble()
         val lon = json.getString("longitude").toDouble()
@@ -44,6 +50,18 @@ object WidgetWeather {
             ?: json.optString("region").takeUnless { it.isBlank() || it == "null" }
             ?: json.optString("country")
         return Place(city, lat, lon, json.optString("timezone"))
+    }
+
+    private fun detectIpWhoIs(): Place {
+        val json = getJson("https://ipwho.is/")
+        require(json.optBoolean("success", false)) { "IP location unavailable" }
+        val lat = json.getDouble("latitude")
+        val lon = json.getDouble("longitude")
+        require(lat in -90.0..90.0 && lon in -180.0..180.0)
+        val city = json.optString("city").takeUnless { it.isBlank() || it == "null" }
+            ?: json.optString("region").takeUnless { it.isBlank() || it == "null" }
+            ?: json.optString("country")
+        return Place(city, lat, lon, json.optJSONObject("timezone")?.optString("id").orEmpty())
     }
 
     fun findCity(query: String): Place? {
