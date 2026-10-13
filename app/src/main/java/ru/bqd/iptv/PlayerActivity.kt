@@ -1383,8 +1383,9 @@ class PlayerActivity : Activity() {
             val place = if (manualCity.isNotBlank() && manualLat.isFinite() && manualLon.isFinite())
                 WidgetWeather.Place(manualCity, manualLat.toDouble(), manualLon.toDouble(), "")
             else detected ?: networkWidgetPlace
-            val conditions = if (needWeather && place != null)
-                runCatching { WidgetWeather.current(place) }.getOrNull() else null
+            val conditionsResult = if (needWeather && place != null)
+                runCatching { WidgetWeather.current(place, Store.weatherCompanyApiKey) } else null
+            val conditions = conditionsResult?.getOrNull()
             runOnUiThread {
                 if (generation != widgetRequestGeneration || isFinishing) return@runOnUiThread
                 if (detected != null) {
@@ -1401,7 +1402,7 @@ class PlayerActivity : Activity() {
                 } else if (needWeather) {
                     widgetWeatherError = if (place == null)
                         "Не удалось определить город по сети. Выберите его вручную."
-                    else "Нет связи с сервисом погоды. Проверьте интернет и повторите загрузку."
+                    else "Погода недоступна: ${conditionsResult?.exceptionOrNull()?.message?.take(190) ?: "ошибка запроса"}. Проверьте интернет и время на ТВ."
                     widgetNextRefreshAt = System.currentTimeMillis() + 5L * 60 * 1000
                 }
                 refreshWidgetUi()
@@ -3534,6 +3535,11 @@ class PlayerActivity : Activity() {
                     }
                 )))
                 rows.add(SdRow(cells = listOf(
+                    SdCell("btn", if (Store.weatherCompanyApiKey.isBlank())
+                        "Weather.com: добавить личный API-ключ" else "Weather.com: ключ задан",
+                        "cloud", wide = true) { showWeatherCompanyKeyDialog() }
+                )))
+                rows.add(SdRow(cells = listOf(
                     SdCell("btn", "Обновить погоду", "sync", wide = true) {
                         widgetWeatherError = ""
                         refreshWidgetData(force = true)
@@ -3652,6 +3658,32 @@ class PlayerActivity : Activity() {
                         }.setNegativeButton("Отмена", null).show()
                 }
             }.show()
+    }
+
+    private fun showWeatherCompanyKeyDialog() {
+        val input = EditText(this)
+        input.setSingleLine(true)
+        input.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        input.hint = "Личный API-ключ Weather.com"
+        input.setText(Store.weatherCompanyApiKey)
+        AlertDialog.Builder(this)
+            .setTitle("Weather.com")
+            .setMessage("Если ключ задан, Weather.com используется первым. Ключ не включается в APK и репозиторий; без него работают другие источники.")
+            .setView(input)
+            .setPositiveButton("Сохранить") { _, _ ->
+                Store.weatherCompanyApiKey = input.text.toString()
+                Store.weatherWidgetUpdatedAt = 0L
+                refreshWidgetData(force = true)
+                rerenderDetail()
+            }
+            .setNeutralButton("Удалить ключ") { _, _ ->
+                Store.weatherCompanyApiKey = ""
+                Store.weatherWidgetUpdatedAt = 0L
+                refreshWidgetData(force = true)
+                rerenderDetail()
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
     }
 
     private fun renamePlaylistDialog(name: String, url: String) {

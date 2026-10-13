@@ -134,6 +134,11 @@ object Store {
         get() = prefs.getLong("weather_widget_updated_at", 0L)
         set(v) { prefs.edit().putLong("weather_widget_updated_at", v).apply() }
 
+    /** Optional personal key, entered on the device; never included in the APK or repository. */
+    var weatherCompanyApiKey: String
+        get() = prefs.getString("weather_company_api_key", "") ?: ""
+        set(v) { prefs.edit().putString("weather_company_api_key", v.trim()).apply() }
+
     fun savedWeatherNetworkPlace(): WidgetWeather.Place? {
         val latitude = prefs.getFloat("weather_network_latitude", Float.NaN)
         val longitude = prefs.getFloat("weather_network_longitude", Float.NaN)
