@@ -1461,6 +1461,7 @@ class PlayerActivity : Activity() {
         return when (panel) {
             Panel.NONE -> handleFullscreenKey(event)
             Panel.LEFT -> {
+                if (event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT) return true
                 val focus = currentFocus
                 val inCatList = focus === catList || (focus?.parent === catList)
                 if (event.action == KeyEvent.ACTION_DOWN) {
@@ -1494,7 +1495,6 @@ class PlayerActivity : Activity() {
                     if (inCatList) {
                         val pos = catList.selectedItemPosition
                         when (event.keyCode) {
-                            KeyEvent.KEYCODE_DPAD_LEFT -> { closeLeftMenuAnimated(); return true }
                             KeyEvent.KEYCODE_DPAD_RIGHT,
                             KeyEvent.KEYCODE_DPAD_CENTER,
                             KeyEvent.KEYCODE_ENTER -> { activateCatOnly(pos); return true }
@@ -1532,8 +1532,8 @@ class PlayerActivity : Activity() {
                 return super.dispatchKeyEvent(event)
             }
             when (code) {
-                KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> { zap(1); return true }
-                KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> { zap(-1); return true }
+                KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_DOWN -> { zap(-1); return true }
+                KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_UP -> { zap(1); return true }
                 KeyEvent.KEYCODE_DPAD_LEFT -> { hideOsd(); openChannelBrowser(); return true }
                 KeyEvent.KEYCODE_DPAD_RIGHT -> { hideOsd(); openEpgPanel(); return true }
                 KeyEvent.KEYCODE_MENU -> { openSettingsPanel(); return true }
@@ -2390,7 +2390,6 @@ class PlayerActivity : Activity() {
         plSelFixed.setOnKeyListener { _, keyCode, event ->
             if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
             when (keyCode) {
-                KeyEvent.KEYCODE_DPAD_LEFT -> { cycleMenuPlaylist(-1); true }
                 KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_CENTER,
                 KeyEvent.KEYCODE_ENTER -> { cycleMenuPlaylist(1); true }
                 KeyEvent.KEYCODE_BACK -> { closeLeftMenuAnimated(); true }
@@ -2410,7 +2409,7 @@ class PlayerActivity : Activity() {
             when (keyCode) {
                 KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_CENTER,
                 KeyEvent.KEYCODE_ENTER -> { action(); true }
-                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_BACK -> { closeLeftMenuAnimated(); true }
+                KeyEvent.KEYCODE_BACK -> { closeLeftMenuAnimated(); true }
                 else -> false
             }
         }
